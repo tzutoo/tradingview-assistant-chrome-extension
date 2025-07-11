@@ -290,7 +290,9 @@ action.testStrategy = async (request) => {
       let testResults = {}
       if (testParams.shouldTestTF) {
         if (!testParams.listOfTF || testParams.listOfTF.length === 0) {
-          await ui.showWarningPopup(`You set to test timeframes in options, but timeframes list after correction values is empty: ${testParams.listOfTFSource}\nPlease set correct one with separation by comma. \nFor example: 1m,4h`)
+          console.log('[TIMEFRAME_TEST] Empty timeframes list, skipping timeframe testing')
+          ui.statusMessage(`Timeframes list is empty: ${testParams.listOfTFSource}. Skipping timeframe testing.`)
+          // Continue with regular testing instead of blocking
         } else {
           let bestValue = null
           let bestTf = null
@@ -320,7 +322,8 @@ action.testStrategy = async (request) => {
           if (bestValue !== null) {
             await ui.showPopup(`The best value ${bestValue} for timeframe ${bestTf}. Check the saved files to get the best result parameters`)
           } else {
-            await ui.showWarningPopup(`Did not found any result value after testing`)
+            console.log('[TIMEFRAME_TEST] No result value found after testing')
+            ui.statusMessage('No result value found after timeframe testing. Check console for details.')
           }
         }
       } else {
@@ -330,8 +333,15 @@ action.testStrategy = async (request) => {
 
     }
   } catch (err) {
-    console.error(err)
-    await ui.showErrorPopup(`${err}`)
+    console.error('[BACKTEST_ERROR] Error during strategy testing:', err)
+
+    // Don't show popup, just log and try to continue gracefully
+    console.error('[BACKTEST_ERROR] Testing failed, but continuing to prevent UI blocking')
+
+    // Try to show a non-blocking status message instead
+    ui.statusMessage(`Testing failed: ${err.message || err}. Check console for details.`)
+
+    // Don't throw the error to avoid blocking the UI
   }
   ui.statusMessageRemove()
 }
@@ -445,51 +455,7 @@ action._showStartMsg = (paramSpaceNumber, cycles, addInfo) => {
   ui.statusMessage(`Started${addInfo}.`, extraHeader)
 }
 
-/**
- * Waits for TradingView to automatically update the report after parameter changes
- * @param {number} timeout - Maximum time to wait in milliseconds
- * @returns {Promise<boolean>} - True if auto update was detected
- */
-action._waitForAutoReportUpdate = async (timeout = 8000) => {
-  console.log('[AUTO_UPDATE] Monitoring for automatic report updates...')
 
-  const tick = 500 // Check every 500ms
-  const maxIterations = Math.floor(timeout / tick)
-
-  for (let i = 0; i < maxIterations; i++) {
-    try {
-      // Check for "Update report" button appearing (indicates TradingView detected parameter change)
-      const updateButton = document.querySelector(SEL.strategyUpdateReportSnackbar)
-      if (updateButton) {
-        console.log('[AUTO_UPDATE] "Update report" button appeared - TradingView detected parameter change')
-
-        // Click the update button
-        const clicked = await tv._checkAndClickRegularUpdateReportButton()
-        if (clicked) {
-          console.log('[AUTO_UPDATE] Clicked update button, waiting for completion...')
-          const success = await tv._waitForUpdateReportSuccess(10000)
-          return success
-        }
-      }
-
-      // Check for any loading indicators or report changes
-      const loadingIndicator = document.querySelector(SEL.strategyReportInProcess)
-      if (loadingIndicator) {
-        console.log('[AUTO_UPDATE] Report loading detected, waiting for completion...')
-        // Wait for loading to complete
-        await page.waitForTimeout(2000)
-        return true
-      }
-
-      await page.waitForTimeout(tick)
-    } catch (error) {
-      console.log('[AUTO_UPDATE] Error during monitoring:', error.message)
-    }
-  }
-
-  console.log('[AUTO_UPDATE] No automatic update detected within timeout')
-  return false
-}
 
 /**
  * Validates that the current report shows the expected optimal value
@@ -566,7 +532,7 @@ action._validateOptimalReport = async (testResults, expectedOptimalValue) => {
  * @returns {Promise<boolean>} - True if successfully validated
  */
 action._ensureOptimalParametersAndReport = async (testResults, propVal, bestResult) => {
-  const maxRetries = 5  // Reasonable retry count
+  const maxRetries = 3  // Reduced retry count for faster execution
   const expectedOptimalValue = bestResult[testResults.optParamName]
 
   console.log('[OPTIMAL_SETUP] Starting optimal parameter setup and validation')
@@ -599,35 +565,17 @@ action._ensureOptimalParametersAndReport = async (testResults, propVal, bestResu
       return true
     }
 
-    console.log('[OPTIMAL_SETUP] Report does not match expected value, trying refresh methods...')
-    console.log('[OPTIMAL_SETUP] This may be due to TradingView UI lag or report sync issues')
+    console.log('[OPTIMAL_SETUP] Report does not match expected value, re-setting parameters...')
 
-    // Try different refresh approaches based on attempt number
+    // Simple approach: Just re-set parameters to trigger update
     try {
-      if (attempt <= 2) {
-        // First attempts: Use gentle refresh methods
-        console.log('[OPTIMAL_SETUP] Using gentle refresh methods...')
-        await tv._forceReportRefresh()
-        await page.waitForTimeout(2000)
-
-      } else if (attempt <= 4) {
-        // Middle attempts: Re-set parameters to trigger update
-        console.log('[OPTIMAL_SETUP] Re-setting parameters to trigger update...')
-        await tv.setStrategyParams(testResults.shortName, propVal)
-        await page.waitForTimeout(3000)
-
-      } else {
-        // Final attempt: Aggressive refresh
-        console.log('[OPTIMAL_SETUP] Using aggressive refresh methods...')
-        await tv._forceReportRefresh()
-        await page.waitForTimeout(1000)
-        await tv.setStrategyParams(testResults.shortName, propVal)
-        await page.waitForTimeout(4000)
-      }
+      console.log('[OPTIMAL_SETUP] Re-setting parameters to trigger TradingView update...')
+      await tv.setStrategyParams(testResults.shortName, propVal)
+      await page.waitForTimeout(2000) // Shorter wait time
 
     } catch (error) {
-      console.log('[OPTIMAL_SETUP] Error during refresh attempt:', error.message)
-      await page.waitForTimeout(2000)
+      console.log('[OPTIMAL_SETUP] Error during parameter re-setting:', error.message)
+      await page.waitForTimeout(1000)
     }
 
     // If this is the last attempt, break
@@ -637,28 +585,10 @@ action._ensureOptimalParametersAndReport = async (testResults, propVal, bestResu
     }
   }
 
-  // Final validation with one last refresh attempt
-  console.log('[OPTIMAL_SETUP] Performing final validation with last refresh attempt...')
+  // Final validation - simple and fast
+  console.log('[OPTIMAL_SETUP] Performing final validation...')
 
-  // Last attempt: Force refresh and wait for TradingView to update
-  try {
-    await tv._forceReportRefresh()
-    await page.waitForTimeout(2000)
-
-    // Check one more time for "Update report" button
-    const lastUpdateCheck = await tv._checkAndClickRegularUpdateReportButton()
-    if (lastUpdateCheck) {
-      console.log('[OPTIMAL_SETUP] Final update button found and clicked')
-      await tv._waitForUpdateReportSuccess(10000)
-    } else {
-      console.log('[OPTIMAL_SETUP] No final update button, waiting for auto-update...')
-      await action._waitForAutoReportUpdate(6000)
-    }
-  } catch (error) {
-    console.log('[OPTIMAL_SETUP] Error in final refresh attempt:', error.message)
-  }
-
-  // Final validation with report sync
+  // Ensure report is current one final time
   await tv._ensureReportIsCurrent()
   const finalValidation = await action._validateOptimalReport(testResults, expectedOptimalValue)
 
@@ -685,7 +615,8 @@ action._ensureOptimalParametersAndReport = async (testResults, propVal, bestResu
 action._saveTestResults = async (testResults, testParams, isFinalTest = true) => {
   console.log('testResults', testResults)
   if (!testResults.perfomanceSummary && !testResults.perfomanceSummary.length) {
-    await ui.showWarningPopup('There is no testing data for saving. Try to do test again')
+    console.log('[SAVE_RESULTS] No testing data available for saving')
+    ui.statusMessage('No testing data available for saving. Please run a test first.')
     return
   }
 

@@ -606,26 +606,96 @@ tv.openStrategyParameters = async (indicatorTitle, searchAgainstStrategies = fal
   }
 
   if (!isOpened) {
-    await ui.showErrorPopup('There is not strategy param button on the strategy tab. Test stopped. Open correct page please')
-    return null
+    console.log('[AUTO_FIX] Strategy param button not found, attempting auto-fix...')
+
+    // Try to auto-fix by opening the panel if it's closed
+    const success = await tv._autoFixStrategyPanel()
+    if (success) {
+      console.log('[AUTO_FIX] Panel opened successfully, retrying strategy parameters...')
+      // Retry opening strategy parameters
+      isOpened = await tv.openStrategyParameters(null, false)
+    }
+
+    if (!isOpened) {
+      console.error('[AUTO_FIX] Failed to auto-fix strategy panel issue')
+      throw new Error('Strategy parameters cannot be opened - panel may be closed or strategy not loaded')
+    }
   }
   const stratIndicatorEl = await page.waitForSelector(SEL.indicatorTitle, 2000)
   if (!stratIndicatorEl) {
-    await ui.showErrorPopup('There is not strategy parameters popup. If was not opened, probably TV UI changes. ' +
-      'Reload page and try again. Test stopped. Open correct page please')
-    return null
+    console.log('[AUTO_FIX] Strategy parameters popup not found, attempting auto-fix...')
+
+    // Try to auto-fix by re-opening strategy parameters
+    const fixSuccess = await tv._autoFixStrategyPanel()
+    if (fixSuccess) {
+      // Wait a bit and try to find the popup again
+      await page.waitForTimeout(1000)
+      const retryEl = await page.waitForSelector(SEL.indicatorTitle, 2000)
+      if (retryEl) {
+        console.log('[AUTO_FIX] Successfully recovered strategy parameters popup')
+      } else {
+        console.error('[AUTO_FIX] Failed to recover strategy parameters popup')
+        throw new Error('Strategy parameters popup cannot be opened after auto-fix attempt')
+      }
+    } else {
+      console.error('[AUTO_FIX] Auto-fix failed for strategy parameters popup')
+      throw new Error('Strategy parameters popup not found and auto-fix failed')
+    }
   }
   const tabInputEl = document.querySelector(SEL.tabInput)
   if (!tabInputEl) {
-    await ui.showErrorPopup('There is not strategy parameters input tab. Test stopped. Open correct page please')
-    return null
+    console.log('[AUTO_FIX] Strategy parameters input tab not found, attempting auto-fix...')
+
+    // Try to find and click any available tabs
+    const allTabs = document.querySelectorAll('button[role="tab"], div[role="tab"], [class*="tab"]')
+    let tabFound = false
+
+    for (const tab of allTabs) {
+      const tabText = (tab.textContent || '').toLowerCase()
+      if (tabText.includes('input') || tabText.includes('parameter') || tabText.includes('setting')) {
+        console.log('[AUTO_FIX] Found potential input tab, clicking...')
+        tab.click()
+        await page.waitForTimeout(500)
+        tabFound = true
+        break
+      }
+    }
+
+    if (!tabFound) {
+      console.error('[AUTO_FIX] No suitable input tab found')
+      throw new Error('Strategy parameters input tab not found and auto-fix failed')
+    }
+
+    // Wait and check again
+    await page.waitForTimeout(1000)
+    const retryTabEl = document.querySelector(SEL.tabInput)
+    if (!retryTabEl) {
+      console.error('[AUTO_FIX] Input tab still not found after auto-fix')
+      throw new Error('Strategy parameters input tab not accessible after auto-fix')
+    }
   }
   page.mouseClick(tabInputEl) //tabInputEl.click()
 
   const tabInputActiveEl = await page.waitForSelector(SEL.tabInputActive)
   if (!tabInputActiveEl) {
-    await ui.showErrorPopup('There is not strategy parameters active input tab. Test stopped. Open correct page please')
-    return null
+    console.log('[AUTO_FIX] Active input tab not found, attempting to activate...')
+
+    // Try clicking the input tab again to activate it
+    const inputTab = document.querySelector(SEL.tabInput)
+    if (inputTab) {
+      console.log('[AUTO_FIX] Re-clicking input tab to activate...')
+      inputTab.click()
+      await page.waitForTimeout(1000)
+
+      const retryActiveEl = await page.waitForSelector(SEL.tabInputActive, 2000)
+      if (!retryActiveEl) {
+        console.error('[AUTO_FIX] Failed to activate input tab')
+        throw new Error('Strategy parameters input tab cannot be activated')
+      }
+    } else {
+      console.error('[AUTO_FIX] Input tab not found for activation')
+      throw new Error('Strategy parameters input tab not found for activation')
+    }
   }
   return true
 }
@@ -734,63 +804,108 @@ tv._waitForUpdateReportSuccess = async (timeout = 5000) => {
 }
 
 /**
+ * Auto-fixes strategy panel issues by opening closed panels
+ * @returns {Promise<boolean>} - True if fix was attempted
+ */
+tv._autoFixStrategyPanel = async () => {
+  console.log('[AUTO_FIX] Attempting to auto-fix strategy panel issues...')
+
+  try {
+    // Method 1: Look for "Open panel" button
+    const openPanelButton = document.querySelector('button[aria-label="Open panel"]')
+    if (openPanelButton) {
+      console.log('[AUTO_FIX] Found "Open panel" button, clicking to open...')
+      openPanelButton.click()
+      await page.waitForTimeout(1500)
+      return true
+    }
+
+    // Method 2: Look for panel toggle buttons
+    const panelToggleButtons = document.querySelectorAll('button[data-name="toggle-visibility-button"]')
+    for (const button of panelToggleButtons) {
+      const tooltip = button.getAttribute('data-tooltip')
+      if (tooltip && tooltip.includes('Open panel')) {
+        console.log('[AUTO_FIX] Found panel toggle button, clicking to open...')
+        button.click()
+        await page.waitForTimeout(1500)
+        return true
+      }
+    }
+
+    // Method 3: Look for collapsed panel indicators
+    const collapsedPanels = document.querySelectorAll('[class*="collapsed"], [class*="closed"]')
+    for (const panel of collapsedPanels) {
+      const expandButton = panel.querySelector('button, [role="button"]')
+      if (expandButton) {
+        console.log('[AUTO_FIX] Found collapsed panel, attempting to expand...')
+        expandButton.click()
+        await page.waitForTimeout(1000)
+      }
+    }
+
+    // Method 4: Try to expand strategy tab specifically
+    const strategyTab = document.querySelector(SEL.strategyTab)
+    if (strategyTab) {
+      console.log('[AUTO_FIX] Re-clicking strategy tab to ensure it\'s expanded...')
+      strategyTab.click()
+      await page.waitForTimeout(1000)
+      return true
+    }
+
+    // Method 5: Look for any bottom panel controls
+    const bottomPanelControls = document.querySelectorAll('[class*="bottom"], [class*="panel"], [class*="drawer"]')
+    for (const control of bottomPanelControls) {
+      const expandButton = control.querySelector('button[aria-label*="Open"], button[aria-label*="Expand"], button[aria-label*="Show"]')
+      if (expandButton) {
+        console.log('[AUTO_FIX] Found bottom panel expand button, clicking...')
+        expandButton.click()
+        await page.waitForTimeout(1000)
+        return true
+      }
+    }
+
+    // Method 6: Try keyboard shortcut to toggle panels
+    try {
+      console.log('[AUTO_FIX] Trying keyboard shortcut to toggle panels...')
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await page.waitForTimeout(500)
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }))
+      await page.waitForTimeout(500)
+      return true
+    } catch (e) {
+      // Ignore keyboard shortcut errors
+    }
+
+    console.log('[AUTO_FIX] No obvious panel fix methods found')
+    return false
+
+  } catch (error) {
+    console.log('[AUTO_FIX] Error during auto-fix attempt:', error.message)
+    return false
+  }
+}
+
+/**
  * Forces a report refresh to handle UI lag issues
  * @returns {Promise<boolean>} - True if refresh was attempted
  */
 tv._forceReportRefresh = async () => {
-  console.log('[FORCE_REFRESH] Attempting to force report refresh due to UI lag...')
+  console.log('[FORCE_REFRESH] Attempting simple report refresh...')
 
   try {
-    let refreshAttempted = false
+    // Simple approach: Try to find any tabs and click them to trigger refresh
+    const allTabs = document.querySelectorAll('button[role="tab"], div[role="tab"], button[aria-selected]')
 
-    // Method 1: If Performance Summary tab is not active, click it
-    const performanceTab = document.querySelector(SEL.strategyPerformanceTab)
-    const isPerformanceActive = document.querySelector(SEL.strategyPerformanceTabActive)
-
-    if (performanceTab && !isPerformanceActive) {
-      console.log('[FORCE_REFRESH] Activating Performance Summary tab...')
-      performanceTab.click()
-      await page.waitForTimeout(1500)
-      refreshAttempted = true
-    }
-
-    // Method 2: Switch to Strategy Tester tab and back to force refresh
-    const strategyTab = document.querySelector(SEL.strategyTesterTab)
-    if (strategyTab) {
-      console.log('[FORCE_REFRESH] Switching tabs to force refresh...')
-
-      // Click Strategy Tester tab
-      strategyTab.click()
+    if (allTabs.length >= 2) {
+      console.log('[FORCE_REFRESH] Found tabs, switching to trigger refresh...')
+      // Click first tab, then second tab
+      allTabs[0].click()
+      await page.waitForTimeout(500)
+      allTabs[1].click()
       await page.waitForTimeout(800)
-
-      // Click back to Performance Summary
-      const perfTab = document.querySelector(SEL.strategyPerformanceTab)
-      if (perfTab) {
-        perfTab.click()
-        await page.waitForTimeout(1500)
-        refreshAttempted = true
-      }
-    }
-
-    // Method 3: Try to trigger recalculation by scrolling the report area
-    if (!refreshAttempted) {
-      console.log('[FORCE_REFRESH] Trying scroll method to trigger refresh...')
-      const reportArea = document.querySelector(SEL.strategyReportObserveArea)
-      if (reportArea) {
-        reportArea.scrollTop = reportArea.scrollTop + 1
-        await page.waitForTimeout(100)
-        reportArea.scrollTop = reportArea.scrollTop - 1
-        await page.waitForTimeout(500)
-        refreshAttempted = true
-      }
-    }
-
-    if (refreshAttempted) {
-      console.log('[FORCE_REFRESH] Refresh attempted, waiting for UI to stabilize...')
-      await page.waitForTimeout(1000)
       return true
     } else {
-      console.log('[FORCE_REFRESH] No suitable refresh method found')
+      console.log('[FORCE_REFRESH] No suitable tabs found for refresh')
       return false
     }
 
@@ -1084,15 +1199,45 @@ tv.checkAndOpenStrategy = async (name) => {
     }
     const isOpened = await tv.openStrategyParameters(name)
     if (!isOpened) {
-      console.warn('Can able to open current strategy parameters')
-      await ui.showErrorPopup('Can able to open current strategy parameters Reload the page, leave one strategy on the chart and try again.')
-      return null
+      console.log('[AUTO_FIX] Cannot open strategy parameters, attempting auto-fix...')
+
+      // Try auto-fix and retry
+      const fixSuccess = await tv._autoFixStrategyPanel()
+      if (fixSuccess) {
+        console.log('[AUTO_FIX] Auto-fix completed, retrying strategy parameters...')
+        await page.waitForTimeout(1000)
+        const retryOpened = await tv.openStrategyParameters(name)
+        if (!retryOpened) {
+          console.error('[AUTO_FIX] Failed to open strategy parameters after auto-fix')
+          throw new Error('Strategy parameters cannot be opened after auto-fix attempt')
+        }
+      } else {
+        console.error('[AUTO_FIX] Auto-fix failed for strategy parameters')
+        throw new Error('Strategy parameters cannot be opened and auto-fix failed')
+      }
     }
     if (name) {
       indicatorTitleEl = page.$(SEL.indicatorTitle)
       if (!indicatorTitleEl || indicatorTitleEl.innerText !== name) {
-        await ui.showErrorPopup(`The ${name} strategy parameters could not opened. ${indicatorTitleEl.innerText ? 'Opened "' + indicatorTitleEl.innerText + '".' : ''} Reload the page, leave one strategy on the chart and try again.`)
-        return null
+        console.log(`[AUTO_FIX] Wrong strategy opened. Expected: "${name}", Got: "${indicatorTitleEl?.innerText || 'none'}"`)
+        console.log('[AUTO_FIX] Attempting to find and open correct strategy...')
+
+        // Try to find the correct strategy by double-clicking
+        const correctStrategyOpened = await tv._openStrategyParamsByStrategyDoubleClickBy(name)
+        if (!correctStrategyOpened) {
+          console.error(`[AUTO_FIX] Failed to open correct strategy: ${name}`)
+          throw new Error(`Strategy "${name}" cannot be opened - wrong strategy is active`)
+        }
+
+        // Verify the correct strategy is now open
+        await page.waitForTimeout(1000)
+        const verifyEl = page.$(SEL.indicatorTitle)
+        if (!verifyEl || verifyEl.innerText !== name) {
+          console.error(`[AUTO_FIX] Still wrong strategy after auto-fix. Expected: "${name}", Got: "${verifyEl?.innerText || 'none'}"`)
+          throw new Error(`Strategy "${name}" auto-fix failed - cannot open correct strategy`)
+        }
+
+        console.log(`[AUTO_FIX] Successfully opened correct strategy: ${name}`)
       }
     }
   }
