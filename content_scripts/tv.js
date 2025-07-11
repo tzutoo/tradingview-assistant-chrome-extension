@@ -40,6 +40,130 @@ async function messageHandler(event) {
   }
 }
 
+/**
+ * Retry utility function for handling transient parsing failures
+ * @param {Function} operation - The operation to retry
+ * @param {Object} options - Retry configuration options
+ * @param {number} options.maxAttempts - Maximum number of retry attempts (default: 3)
+ * @param {number} options.baseDelay - Base delay in milliseconds (default: 500)
+ * @param {number} options.backoffMultiplier - Exponential backoff multiplier (default: 1.5)
+ * @param {number} options.jitterMax - Maximum jitter in milliseconds (default: 100)
+ * @param {string} options.operationName - Name for logging purposes
+ * @param {Function} options.isRetryableError - Function to determine if error is retryable
+ * @returns {Promise} - Result of the operation or throws the last error
+ */
+tv.retryParsingOperation = async (operation, options = {}) => {
+  const {
+    maxAttempts = 3,
+    baseDelay = 500,
+    backoffMultiplier = 1.5,
+    jitterMax = 100,
+    operationName = 'parsing operation',
+    isRetryableError = () => true
+  } = options;
+
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      console.log(`[RETRY] Attempting ${operationName} (attempt ${attempt}/${maxAttempts})`);
+      const result = await operation();
+
+      if (attempt > 1) {
+        console.log(`[RETRY] ${operationName} succeeded on attempt ${attempt}/${maxAttempts}`);
+      }
+
+      return result;
+    } catch (error) {
+      lastError = error;
+      console.warn(`[RETRY] ${operationName} failed on attempt ${attempt}/${maxAttempts}:`, error.message);
+
+      // Check if this is the last attempt or if error is not retryable
+      if (attempt === maxAttempts || !isRetryableError(error)) {
+        const errorContext = {
+          operationName,
+          totalAttempts: attempt,
+          maxAttempts,
+          finalError: error.message,
+          errorStack: error.stack,
+          isRetryable: isRetryableError(error)
+        };
+        console.error(`[RETRY] ${operationName} failed after ${attempt} attempts. Error context:`, errorContext);
+
+        // Enhance the error message with retry information
+        const enhancedError = new Error(`${error.message} (failed after ${attempt} retry attempts)`);
+        enhancedError.originalError = error;
+        enhancedError.retryContext = errorContext;
+        throw enhancedError;
+      }
+
+      // Calculate delay with exponential backoff and jitter
+      const exponentialDelay = baseDelay * Math.pow(backoffMultiplier, attempt - 1);
+      const jitter = Math.random() * jitterMax;
+      const totalDelay = exponentialDelay + jitter;
+
+      console.log(`[RETRY] Waiting ${Math.round(totalDelay)}ms before retry ${attempt + 1}/${maxAttempts}`);
+      await page.waitForTimeout(totalDelay);
+    }
+  }
+
+  // This should never be reached, but just in case
+  throw lastError;
+};
+
+/**
+ * Determines if a parsing error is retryable
+ * @param {Error} error - The error to check
+ * @returns {boolean} - True if the error should be retried
+ */
+tv.isRetryableParsingError = (error) => {
+  const retryableMessages = [
+    'Can\'t get performance headers',
+    'Can\'t get performance rows',
+    'querySelectorAll',
+    'querySelector',
+    'innerText',
+    'textContent',
+    'DOM',
+    'element not found',
+    'null',
+    'undefined',
+    'cannot read property',
+    'cannot read properties',
+    'is not a function',
+    'timeout',
+    'network',
+    'loading'
+  ];
+
+  // Non-retryable errors that should fail immediately
+  const nonRetryableMessages = [
+    'permission denied',
+    'access denied',
+    'unauthorized',
+    'forbidden',
+    'not supported',
+    'invalid selector'
+  ];
+
+  const errorMessage = error.message ? error.message.toLowerCase() : '';
+
+  // Check for non-retryable errors first
+  if (nonRetryableMessages.some(msg => errorMessage.includes(msg.toLowerCase()))) {
+    console.log(`[RETRY] Error marked as non-retryable: ${error.message}`);
+    return false;
+  }
+
+  // Check for retryable errors
+  const isRetryable = retryableMessages.some(msg => errorMessage.includes(msg.toLowerCase()));
+
+  if (!isRetryable) {
+    console.log(`[RETRY] Error not recognized as retryable: ${error.message}`);
+  }
+
+  return isRetryable;
+};
+
 
 tv.getStrategy = async (strategyName = '', isIndicatorSave = false, isDeepTest = false) => {
   try {
@@ -1095,21 +1219,70 @@ tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
       : parseFloat(digitalValues)
   }
 
+  // Helper function to safely extract row data with retry logic
+  function parseRowWithRetry(rowEl, maxAttempts = 2) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const allTdEl = rowEl.querySelectorAll('td')
+        if (!allTdEl || allTdEl.length < 2 || !allTdEl[0]) {
+          return null // Skip this row
+        }
+
+        let paramName = allTdEl[0].innerText || ''
+        if (!paramName && attempt < maxAttempts) {
+          console.warn(`[RETRY] Row parsing failed on attempt ${attempt}/${maxAttempts}: empty paramName, retrying...`)
+          continue
+        }
+
+        return { allTdEl, paramName: tv.convertParameterName(paramName) }
+      } catch (error) {
+        console.warn(`[RETRY] Row parsing failed on attempt ${attempt}/${maxAttempts}:`, error.message)
+        if (attempt === maxAttempts) {
+          console.error(`[RETRY] Row parsing failed after ${maxAttempts} attempts, skipping row`)
+          return null
+        }
+      }
+    }
+    return null
+  }
+
+  // Helper function to safely extract cell value with retry logic
+  function getCellValueWithRetry(cellEl, maxAttempts = 2) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const value = cellEl.innerText
+        if (value !== undefined && value !== null) {
+          return value
+        }
+        if (attempt < maxAttempts) {
+          console.warn(`[RETRY] Cell value extraction failed on attempt ${attempt}/${maxAttempts}: undefined/null value, retrying...`)
+        }
+      } catch (error) {
+        console.warn(`[RETRY] Cell value extraction failed on attempt ${attempt}/${maxAttempts}:`, error.message)
+        if (attempt === maxAttempts) {
+          console.error(`[RETRY] Cell value extraction failed after ${maxAttempts} attempts`)
+          return ''
+        }
+      }
+    }
+    return ''
+  }
+
   for (let rowEl of allReportRowsEl) {
     if (rowEl) {
-      const allTdEl = rowEl.querySelectorAll('td')
-      if (!allTdEl || allTdEl.length < 2 || !allTdEl[0]) {
+      const rowData = parseRowWithRetry(rowEl)
+      if (!rowData) {
         continue
       }
-      let paramName = allTdEl[0].innerText || ''
-      paramName = tv.convertParameterName(paramName)
+
+      const { allTdEl, paramName } = rowData
       let isSingleValue = allTdEl.length === 3 || ['Buy & hold return', 'Max equity run-up', 'Max equity drawdown',
         'Open P&L', 'Sharpe ratio', 'Sortino ratio'
       ].includes(paramName)
       for (let i = 1; i < allTdEl.length; i++) {
         if (isSingleValue && i >= 2)
           continue
-        let values = allTdEl[i].innerText
+        let values = getCellValueWithRetry(allTdEl[i])
         const isNegative = ['Gross loss', 'Commission paid', 'Max equity run-up', 'Max equity drawdown',
           'Losing trades', 'Avg losing trade', 'Largest losing trade', 'Largest losing trade percent',
           'Avg # bars in losing trades', 'Margin calls'
@@ -1160,27 +1333,52 @@ tv.parseReportTable = async (isDeepTest) => {
   const selRow = isDeepTest ? SEL.strategyReportDeepTestRow : SEL.strategyReportRow
   await page.waitForSelector(selHeader, 2500)
 
-  let allHeadersEl = document.querySelectorAll(selHeader)
-  if (!allHeadersEl || !(allHeadersEl.length === 4 || allHeadersEl.length === 5)) { // 5 - Extra column for full screen
-    if (!tv.isParsed)
-      throw new Error('Can\'t get performance headers.' + SUPPORT_TEXT)
-    else
-      return {}
-  }
-  let strategyHeaders = []
-  for (let headerEl of allHeadersEl) {
-    if (headerEl)
-      strategyHeaders.push(headerEl.innerText)
-  }
+  // Wrap header element selection with retry logic
+  const { allHeadersEl, strategyHeaders } = await tv.retryParsingOperation(async () => {
+    const headers = document.querySelectorAll(selHeader)
+    if (!headers || !(headers.length === 4 || headers.length === 5)) { // 5 - Extra column for full screen
+      if (!tv.isParsed)
+        throw new Error('Can\'t get performance headers.' + SUPPORT_TEXT)
+      else
+        return { allHeadersEl: [], strategyHeaders: [] }
+    }
+
+    const headerTexts = []
+    for (let headerEl of headers) {
+      if (headerEl)
+        headerTexts.push(headerEl.innerText)
+    }
+
+    return { allHeadersEl: headers, strategyHeaders: headerTexts }
+  }, {
+    operationName: 'header element selection',
+    isRetryableError: tv.isRetryableParsingError,
+    maxAttempts: 3,
+    baseDelay: 300
+  })
+
   let report = {}
   await page.waitForSelector(selRow, 2500)
-  let allReportRowsEl = document.querySelectorAll(selRow)
-  if (!allReportRowsEl || allReportRowsEl.length === 0) {
-    if (!tv.isParsed)
-      throw new Error('Can\'t get performance rows.' + SUPPORT_TEXT)
-  } else {
-    tv.isParsed = true
-  }
+
+  // Wrap row element selection with retry logic
+  const allReportRowsEl = await tv.retryParsingOperation(async () => {
+    const rows = document.querySelectorAll(selRow)
+    if (!rows || rows.length === 0) {
+      if (!tv.isParsed)
+        throw new Error('Can\'t get performance rows.' + SUPPORT_TEXT)
+      else
+        return []
+    } else {
+      tv.isParsed = true
+    }
+    return rows
+  }, {
+    operationName: 'row element selection',
+    isRetryableError: tv.isRetryableParsingError,
+    maxAttempts: 3,
+    baseDelay: 300
+  })
+
   report = tv._parseRows(allReportRowsEl, strategyHeaders, report)
   if (selStatus.isNewVersion) {
     const tabs = [
@@ -1190,16 +1388,28 @@ tv.parseReportTable = async (isDeepTest) => {
       page.mouseClickSelector(sel[0])
       const tabEl = await page.waitForSelector(sel[1], 1000)
       if (tabEl) {
-        strategyHeaders = []
-        allHeadersEl = document.querySelectorAll(selHeader)
-        for (let headerEl of allHeadersEl) {
-          if (headerEl)
-            strategyHeaders.push(headerEl.innerText)
-        }
-        await page.waitForSelector(selRow, 2500)
-        let allReportRowsEl = document.querySelectorAll(selRow)
-        if (allReportRowsEl && allReportRowsEl.length !== 0) {
-          report = tv._parseRows(allReportRowsEl, strategyHeaders, report)
+        // Wrap tab header and row parsing with retry logic
+        const tabParsingResult = await tv.retryParsingOperation(async () => {
+          const tabHeaders = []
+          const tabHeadersEl = document.querySelectorAll(selHeader)
+          for (let headerEl of tabHeadersEl) {
+            if (headerEl)
+              tabHeaders.push(headerEl.innerText)
+          }
+
+          await page.waitForSelector(selRow, 2500)
+          const tabRowsEl = document.querySelectorAll(selRow)
+
+          return { headers: tabHeaders, rows: tabRowsEl }
+        }, {
+          operationName: `tab parsing (${sel[0]})`,
+          isRetryableError: tv.isRetryableParsingError,
+          maxAttempts: 3,
+          baseDelay: 300
+        })
+
+        if (tabParsingResult.rows && tabParsingResult.rows.length !== 0) {
+          report = tv._parseRows(tabParsingResult.rows, tabParsingResult.headers, report)
         }
       }
     }
