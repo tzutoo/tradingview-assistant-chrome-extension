@@ -89,6 +89,190 @@ action.downloadStrategyTestResults = async () => {
 
 action.testStrategy = async (request, isDeepTest = false) => {
   try {
+    // Wait for tv object to be available with timeout
+    console.log('[ACTION_DEBUG] Waiting for tv object to be available...')
+
+    const waitForTv = async (maxWaitTime = 10000) => {
+      const startTime = Date.now()
+      const checkInterval = 100
+
+      console.log('[ACTION_DEBUG] Starting to wait for tv object...')
+      console.log('[ACTION_DEBUG] Initial check - window.tvScriptStarted:', window.tvScriptStarted)
+      console.log('[ACTION_DEBUG] Initial check - window.tvScriptLoaded:', window.tvScriptLoaded)
+      console.log('[ACTION_DEBUG] Initial check - window.tv exists:', typeof window.tv !== 'undefined')
+      console.log('[ACTION_DEBUG] Initial check - window.tvTest exists:', typeof window.tvTest !== 'undefined')
+
+      // Try to run the test function if it exists
+      if (typeof window.tvTest === 'function') {
+        try {
+          const testResult = window.tvTest()
+          console.log('[ACTION_DEBUG] tv test function result:', testResult)
+        } catch (testError) {
+          console.log('[ACTION_DEBUG] tv test function error:', testError.message)
+        }
+      }
+
+      while (Date.now() - startTime < maxWaitTime) {
+        // Check if tv.js script has started/loaded
+        if (window.tvScriptStarted) {
+          console.log('[ACTION_DEBUG] tv.js script started indicator found')
+        }
+        if (window.tvScriptLoaded) {
+          console.log('[ACTION_DEBUG] tv.js script loaded indicator found')
+        }
+
+        // Check if tv is available in window
+        if (typeof window !== 'undefined' && window.tv) {
+          console.log('[ACTION_DEBUG] Found tv in window scope after', Date.now() - startTime, 'ms')
+          return window.tv
+        }
+
+        // Check if tv is available in globalThis
+        if (typeof globalThis !== 'undefined' && globalThis.tv) {
+          console.log('[ACTION_DEBUG] Found tv in globalThis scope after', Date.now() - startTime, 'ms')
+          return globalThis.tv
+        }
+
+        // Log progress every second
+        const elapsed = Date.now() - startTime
+        if (elapsed % 1000 < checkInterval) {
+          console.log('[ACTION_DEBUG] Still waiting for tv object...', elapsed, 'ms elapsed')
+        }
+
+        // Wait a bit before checking again
+        await new Promise(resolve => setTimeout(resolve, checkInterval))
+      }
+
+      console.log('[ACTION_DEBUG] Timeout reached waiting for tv object')
+      return null
+    }
+
+    let tvObject = await waitForTv()
+
+    if (!tvObject) {
+      // Last resort: try to create a minimal tv object if the script failed to load
+      console.error('[ACTION_ERROR] tv object not found after waiting, attempting to create fallback tv object')
+      console.error('[ACTION_ERROR] This indicates tv.js failed to load or execute properly')
+      console.error('[ACTION_ERROR] Available window properties:', Object.keys(window).filter(key => key.toLowerCase().includes('tv')))
+
+      // Additional diagnostics
+      console.error('[ACTION_ERROR] Script loading diagnostics:')
+      console.error('[ACTION_ERROR] - Document ready state:', document.readyState)
+      console.error('[ACTION_ERROR] - Extension scripts loaded:', {
+        page: typeof page !== 'undefined',
+        ui: typeof ui !== 'undefined',
+        SEL: typeof SEL !== 'undefined',
+        action: typeof action !== 'undefined',
+        backtest: typeof backtest !== 'undefined'
+      })
+      console.error('[ACTION_ERROR] - Chrome extension context:', {
+        runtime: typeof chrome?.runtime !== 'undefined',
+        extensionId: chrome?.runtime?.id
+      })
+
+      // Create a complete fallback tv object to prevent complete failure
+      console.log('[TV_FALLBACK] Creating complete fallback tv object...')
+      tvObject = {
+        // Properties
+        isReportChanged: false,
+        _isInitialized: false,
+        reportNode: null,
+        reportDeepNode: null,
+        tickerTextPrev: null,
+        timeFrameTextPrev: null,
+        _settingsMethod: null,
+
+        // Core methods that action.js needs
+        _initialize: async () => {
+          console.log('[TV_FALLBACK] Using fallback tv object');
+          return true;
+        },
+
+        getStrategy: async (strategyName = '', isIndicatorSave = false, isDeepTest = false) => {
+          throw new Error('tv.js failed to load - getStrategy not available. Please reload the page and ensure all scripts load properly.');
+        },
+
+        setStrategyParams: async (strategyName, params, isDeepTest, isIgnoreError) => {
+          throw new Error('tv.js failed to load - setStrategyParams not available. Please reload the page and ensure all scripts load properly.');
+        },
+
+        getPerformance: async (testResults, isIgnoreError = false) => {
+          throw new Error('tv.js failed to load - getPerformance not available. Please reload the page and ensure all scripts load properly.');
+        },
+
+        setDeepTest: async (isDeepTest) => {
+          throw new Error('tv.js failed to load - setDeepTest not available. Please reload the page and ensure all scripts load properly.');
+        },
+
+        checkAndOpenStrategy: async (name, isDeepTest = false) => {
+          throw new Error('tv.js failed to load - checkAndOpenStrategy not available. Please reload the page and ensure all scripts load properly.');
+        },
+
+        openStrategyTab: async (isDeepTest) => {
+          throw new Error('tv.js failed to load - openStrategyTab not available. Please reload the page and ensure all scripts load properly.');
+        },
+
+        openStrategyParameters: async (indicatorTitle, searchAgainstStrategies = false) => {
+          throw new Error('tv.js failed to load - openStrategyParameters not available. Please reload the page and ensure all scripts load properly.');
+        },
+
+        // Debug methods
+        _debugStatus: () => {
+          return {
+            isFallback: true,
+            reason: 'tv.js script failed to load',
+            suggestion: 'Please reload the page and check browser console for script loading errors'
+          }
+        }
+      }
+
+      // Make it globally available for other scripts
+      if (typeof window !== 'undefined') {
+        window.tv = tvObject
+
+        // Add a global diagnostic function
+        window.diagnoseTvLoading = () => {
+          const diagnosis = {
+            tvScriptStarted: window.tvScriptStarted || false,
+            tvScriptLoaded: window.tvScriptLoaded || false,
+            tvObjectExists: typeof window.tv !== 'undefined',
+            tvObjectIsFallback: window.tv?._debugStatus?.()?.isFallback || false,
+            documentReadyState: document.readyState,
+            extensionScripts: {
+              page: typeof page !== 'undefined',
+              ui: typeof ui !== 'undefined',
+              SEL: typeof SEL !== 'undefined',
+              action: typeof action !== 'undefined',
+              backtest: typeof backtest !== 'undefined'
+            },
+            chromeExtension: {
+              runtime: typeof chrome?.runtime !== 'undefined',
+              extensionId: chrome?.runtime?.id
+            },
+            recommendation: 'tv.js failed to load. Try reloading the page. If problem persists, check browser console for script errors.'
+          }
+
+          console.log('[TV_DIAGNOSIS] Complete loading diagnosis:', diagnosis)
+          return diagnosis
+        }
+      }
+
+      console.warn('[ACTION_WARN] Created fallback tv object - functionality will be limited')
+      console.warn('[ACTION_WARN] Run diagnoseTvLoading() in console for detailed diagnosis')
+    }
+
+    // Use the found or created tv object
+    console.log('[ACTION_DEBUG] Using tv object, initialized:', tvObject._isInitialized)
+
+    // Ensure tv is initialized
+    if (tvObject._initialize && !tvObject._isInitialized) {
+      console.log('[ACTION_DEBUG] Initializing tv object...')
+      await tvObject._initialize()
+    }
+
+    // Use tvObject for all tv operations
+    const tv = tvObject
+
     const strategyData = await action._getStrategyData(isDeepTest)
     const [allRangeParams, paramRange, cycles] = await action._getRangeParams(strategyData)
     if (allRangeParams !== null) { // click cancel on parameters

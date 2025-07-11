@@ -216,6 +216,54 @@ async function getInitBestValues(testResults) {
 
 backtest.getTestIterationResult = async (testResults, propVal, isIgnoreError = false, isIgnoreSetParam = false) => {
   try {
+    // Wait for tv object to be available with timeout
+    console.log('[BACKTEST_DEBUG] Waiting for tv object to be available...')
+
+    const waitForTv = async (maxWaitTime = 5000) => {
+      const startTime = Date.now()
+      const checkInterval = 100
+
+      while (Date.now() - startTime < maxWaitTime) {
+        // Check if tv is available in window
+        if (typeof window !== 'undefined' && window.tv) {
+          console.log('[BACKTEST_DEBUG] Found tv in window scope after', Date.now() - startTime, 'ms')
+          return window.tv
+        }
+
+        // Check if tv is available in globalThis
+        if (typeof globalThis !== 'undefined' && globalThis.tv) {
+          console.log('[BACKTEST_DEBUG] Found tv in globalThis scope after', Date.now() - startTime, 'ms')
+          return globalThis.tv
+        }
+
+        // Wait a bit before checking again
+        await new Promise(resolve => setTimeout(resolve, checkInterval))
+      }
+
+      return null
+    }
+
+    let tvObject = await waitForTv()
+
+    if (!tvObject) {
+      console.error('[BACKTEST_ERROR] tv object not found after waiting')
+      console.error('[BACKTEST_ERROR] This indicates tv.js failed to load or execute properly')
+      console.error('[BACKTEST_ERROR] Available globals:', Object.keys(window).filter(key => key.includes('tv') || key.includes('TV')))
+      throw new Error('tv object is not accessible after waiting. tv.js may have failed to load. Please reload the page and try again.')
+    }
+
+    // Use the found tv object
+    console.log('[BACKTEST_DEBUG] Using tv object, initialized:', tvObject._isInitialized)
+
+    // Ensure tv is initialized
+    if (tvObject._initialize && !tvObject._isInitialized) {
+      console.log('[BACKTEST_DEBUG] Initializing tv object...')
+      await tvObject._initialize()
+    }
+
+    // Use tvObject for all tv operations
+    const tv = tvObject
+
     tv.isReportChanged = false // Global value
     let startTime = new Date()
     if (!isIgnoreSetParam) {
