@@ -335,13 +335,8 @@ tv.getStrategy = async (strategyName = '', isIndicatorSave = false, isDeepTest =
   try {
     await tv.openStrategyTab(isDeepTest)
 
-    // Wait for strategy tab to fully load before proceeding
-    console.log('[PARSE_TIMING] Strategy tab opened, waiting for full load...')
-    await new Promise(resolve => setTimeout(resolve, 800))
-
-    // Wait for TradingView data to be ready
-    await tv._waitForTradingViewDataLoad(1500)
-    console.log('[PARSE_TIMING] Strategy tab ready for interaction')
+    // Fast data detection - no fixed delays
+    await tv._fastDataDetection(1000)
 
   } catch (err) {
     console.warn('checkAndOpenStrategy error', err)
@@ -987,105 +982,63 @@ tv._waitForRegularReportUpdate = async (timeout = 15000) => {
  * @param {number} timeout - Maximum time to wait in milliseconds
  * @returns {Promise<boolean>} - True if tab content is stable
  */
-tv._waitForTabContentStable = async (tabName, selRow, timeout = 2000) => {
-  console.log(`[TAB_WAIT] Waiting for ${tabName} tab content to stabilize...`)
-
+tv._fastTabStabilization = async (selRow, timeout = 800) => {
   const startTime = Date.now()
-  const tick = 150
+  const tick = 100
   const maxIterations = Math.floor(timeout / tick)
 
   let previousRowCount = 0
-  let stableCount = 0
-  const requiredStableChecks = 2 // Need 2 consecutive stable checks (reduced from 3)
 
   for (let i = 0; i < maxIterations; i++) {
-    try {
-      const rows = document.querySelectorAll(selRow)
-      const currentRowCount = rows.length
+    const rows = document.querySelectorAll(selRow)
+    const currentRowCount = rows.length
 
-      if (currentRowCount === previousRowCount && currentRowCount > 0) {
-        stableCount++
-        if (stableCount >= requiredStableChecks) {
-          const elapsedTime = Date.now() - startTime
-          console.log(`[TAB_WAIT] ${tabName} tab content stable with ${currentRowCount} rows after ${elapsedTime}ms`)
-          return true
-        }
-      } else {
-        stableCount = 0 // Reset if count changed
-      }
-
-      previousRowCount = currentRowCount
-      await page.waitForTimeout(tick)
-    } catch (error) {
-      console.warn(`[TAB_WAIT] Error checking ${tabName} tab stability:`, error)
+    // If we have rows and count is stable, we're ready
+    if (currentRowCount > 0 && currentRowCount === previousRowCount) {
+      return true
     }
+
+    previousRowCount = currentRowCount
+    await new Promise(resolve => setTimeout(resolve, tick))
   }
 
-  const elapsedTime = Date.now() - startTime
-  console.log(`[TAB_WAIT] ${tabName} tab content did not stabilize after ${elapsedTime}ms`)
   return false
 }
 
 /**
- * Wait for TradingView to finish loading report data
+ * Fast data availability detection - immediately detects when TradingView data is ready
  * @param {number} timeout - Maximum time to wait in milliseconds
  * @returns {Promise<boolean>} - True if data appears loaded
  */
-tv._waitForTradingViewDataLoad = async (timeout = 2000) => {
-  console.log('[TV_WAIT] Waiting for TradingView report data to load...')
-
+tv._fastDataDetection = async (timeout = 1000) => {
   const startTime = Date.now()
-  const checkInterval = 100
+  const checkInterval = 50 // Faster polling
   const maxIterations = Math.floor(timeout / checkInterval)
 
+  // Cache selectors for performance
+  const loadingSelectors = 'div[class*="loading"], div[class*="spinner"], [data-name="loader"]'
+
   for (let i = 0; i < maxIterations; i++) {
-    try {
-      // Check for loading indicators that suggest data is still loading
-      const loadingIndicators = [
-        'div[class*="loading"]',
-        'div[class*="spinner"]',
-        'div[class*="progress"]',
-        '[data-name="loader"]',
-        '.tv-spinner'
-      ]
-
-      const hasLoadingIndicator = loadingIndicators.some(selector =>
-        document.querySelector(selector) !== null
-      )
-
-      if (!hasLoadingIndicator) {
-        // Check if we have actual data in the tables
-        const tables = document.querySelectorAll('table')
-        let hasDataInTables = false
-
-        for (const table of tables) {
-          const cells = table.querySelectorAll('td')
-          for (const cell of cells) {
-            const text = cell.textContent?.trim()
-            if (text && text !== '—' && text !== '-' && text !== 'N/A' && text.length > 0) {
-              hasDataInTables = true
-              break
-            }
+    // Quick loading indicator check
+    if (!document.querySelector(loadingSelectors)) {
+      // Fast table data check - only check first few cells
+      const firstTable = document.querySelector('table')
+      if (firstTable) {
+        const firstCells = firstTable.querySelectorAll('td')
+        for (let j = 0; j < Math.min(5, firstCells.length); j++) {
+          const text = firstCells[j].textContent?.trim()
+          if (text && text !== '—' && text !== '-' && text.length > 0) {
+            return true // Data found immediately
           }
-          if (hasDataInTables) break
-        }
-
-        if (hasDataInTables) {
-          const elapsedTime = Date.now() - startTime
-          console.log(`[TV_WAIT] TradingView data appears loaded after ${elapsedTime}ms`)
-          return true
         }
       }
-
-      await new Promise(resolve => setTimeout(resolve, checkInterval))
-    } catch (error) {
-      console.warn('[TV_WAIT] Error checking data load status:', error)
     }
+
+    // Minimal delay for next check
+    await new Promise(resolve => setTimeout(resolve, checkInterval))
   }
 
-  const elapsedTime = Date.now() - startTime
-  console.log(`[TV_WAIT] Timeout reached after ${elapsedTime}ms, proceeding anyway`)
-  return false
+  return false // Timeout - proceed anyway
 }
 
 /**
@@ -1943,27 +1896,17 @@ tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
   let newFieldsAdded = 0
   let duplicatesSkipped = 0
 
-  // Helper function to assign field value with duplicate detection
+  // Optimized field assignment with minimal logging
   function assignField(fieldName, value, source = 'parsing') {
     if (parsedFields.has(fieldName)) {
-      // Field already exists, check if we should update it
       const existingValue = report[fieldName]
       if (existingValue === 'error' && value !== 'error') {
-        // Replace error with valid value
         report[fieldName] = value
-        console.log(`[FIELD_UPDATE] Replaced error in "${fieldName}" with "${value}" from ${source}`)
         return true
-      } else if (existingValue !== value) {
-        // Different value, log but don't replace (keep first successful parse)
-        duplicatesSkipped++
-        console.log(`[FIELD_DUPLICATE] Skipping duplicate "${fieldName}": existing="${existingValue}", new="${value}"`)
-        return false
       }
-      // Same value, skip silently
       duplicatesSkipped++
       return false
     } else {
-      // New field
       report[fieldName] = value
       parsedFields.add(fieldName)
       newFieldsAdded++
@@ -2079,111 +2022,64 @@ tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
     return null
   }
 
-  // Helper function to safely extract cell value with multiple fallback methods
+  // Optimized cell extraction with minimal logging
   function getCellValueWithRetry(cellEl, maxAttempts = 2) {
-    // First, check if the element is actually accessible
     if (!cellEl || !cellEl.isConnected) {
-      console.warn(`[CELL_EXTRACT] Element is null or not connected to DOM`)
       return ''
     }
 
-    const extractionMethods = [
-      // Method 1: innerText
+    // Fast extraction methods - try most reliable first
+    const fastMethods = [
       () => cellEl.innerText,
-      // Method 2: textContent
       () => cellEl.textContent,
-      // Method 3: innerHTML stripped of tags
-      () => cellEl.innerHTML?.replace(/<[^>]*>/g, ''),
-      // Method 4: Direct child text nodes
-      () => {
+      () => cellEl.innerHTML?.replace(/<[^>]*>/g, '')
+    ]
+
+    // Try fast methods first
+    for (const method of fastMethods) {
+      try {
+        const value = method()
+        if (value && value.toString().trim()) {
+          return value.toString().trim()
+        }
+      } catch (error) {
+        // Silent continue
+      }
+    }
+
+    // If fast methods failed, try comprehensive extraction
+    if (maxAttempts > 1) {
+      // Direct child text nodes
+      try {
         const textNodes = []
         for (const child of cellEl.childNodes) {
-          if (child.nodeType === Node.TEXT_NODE) {
-            textNodes.push(child.textContent)
+          if (child.nodeType === Node.TEXT_NODE && child.textContent.trim()) {
+            textNodes.push(child.textContent.trim())
           }
         }
-        return textNodes.join(' ')
-      },
-      // Method 5: getAttribute if it's an input or has value
-      () => cellEl.getAttribute('value') || cellEl.getAttribute('data-value'),
-      // Method 6: Deep text extraction
-      () => {
-        const walker = document.createTreeWalker(
-          cellEl,
-          NodeFilter.SHOW_TEXT,
-          null,
-          false
-        )
+        if (textNodes.length > 0) {
+          return textNodes.join(' ')
+        }
+      } catch (error) {
+        // Silent continue
+      }
+
+      // Deep text extraction as last resort
+      try {
+        const walker = document.createTreeWalker(cellEl, NodeFilter.SHOW_TEXT, null, false)
         const textParts = []
         let node
         while (node = walker.nextNode()) {
-          if (node.textContent.trim()) {
-            textParts.push(node.textContent.trim())
-          }
+          const text = node.textContent.trim()
+          if (text) textParts.push(text)
         }
-        return textParts.join(' ')
-      }
-    ]
-
-    // Try all methods on first attempt before retrying
-    for (let methodIndex = 0; methodIndex < extractionMethods.length; methodIndex++) {
-      try {
-        const value = extractionMethods[methodIndex]()
-        if (value !== undefined && value !== null && value.toString().trim() !== '') {
-          const trimmedValue = value.toString().trim()
-          if (methodIndex > 0) {
-            console.log(`[CELL_EXTRACT] Success with method ${methodIndex + 1}: "${trimmedValue.substring(0, 50)}${trimmedValue.length > 50 ? '...' : ''}"`)
-          }
-          return trimmedValue
+        if (textParts.length > 0) {
+          return textParts.join(' ')
         }
       } catch (error) {
-        // Only log errors for first few methods to reduce spam
-        if (methodIndex < 2) {
-          console.warn(`[CELL_EXTRACT] Method ${methodIndex + 1} failed:`, error.message)
-        }
+        // Silent continue
       }
     }
-
-    // If all methods failed on first attempt, try one more time with a delay
-    if (maxAttempts > 1) {
-      console.warn(`[CELL_EXTRACT] All methods failed, retrying once more...`)
-
-      // Small delay before retry (synchronous)
-      const start = Date.now()
-      while (Date.now() - start < 50) {
-        // Busy wait for 50ms
-      }
-
-      // Try the most reliable methods again
-      const retryMethods = [
-        () => cellEl.innerText,
-        () => cellEl.textContent,
-        () => cellEl.innerHTML?.replace(/<[^>]*>/g, '')
-      ]
-
-      for (let methodIndex = 0; methodIndex < retryMethods.length; methodIndex++) {
-        try {
-          const value = retryMethods[methodIndex]()
-          if (value !== undefined && value !== null && value.toString().trim() !== '') {
-            const trimmedValue = value.toString().trim()
-            console.log(`[CELL_EXTRACT] Retry success with method ${methodIndex + 1}: "${trimmedValue.substring(0, 50)}${trimmedValue.length > 50 ? '...' : ''}"`)
-            return trimmedValue
-          }
-        } catch (error) {
-          // Silent retry
-        }
-      }
-    }
-
-    // Log element details for debugging when all methods fail
-    console.error(`[CELL_EXTRACT] All methods failed. Element details:`, {
-      tagName: cellEl.tagName,
-      className: cellEl.className,
-      id: cellEl.id,
-      hasChildren: cellEl.children.length > 0,
-      isVisible: cellEl.offsetParent !== null,
-      innerHTML: cellEl.innerHTML?.substring(0, 100)
-    })
 
     return ''
   }
@@ -2214,9 +2110,7 @@ tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
                                paramName.toLowerCase().includes('gross profit') ||
                                paramName.toLowerCase().includes('gross loss')
 
-            if (isKeyMetric) {
-              console.log(`[PARSE_DEBUG] ${paramName} - Raw value: "${values}", Header: "${strategyHeaders[i]}"`)
-            }
+            // Key metric detected - processing
 
             values = values.replaceAll(' ', ' ').replaceAll('−', '-').trim()
             const digitalValues = values.replaceAll(/([\-\d\.\n])|(.)/g, (a, b) => b || '')
@@ -2224,10 +2118,7 @@ tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
             const nameDigits = isSingleValue ? paramName : `${paramName}: ${strategyHeaders[i]}`
             const namePercents = isSingleValue ? `${paramName} %` : `${paramName} %: ${strategyHeaders[i]}`
 
-            if (isKeyMetric) {
-              console.log(`[PARSE_DEBUG] ${paramName} - Processed: "${values}", Digital: "${digitalValues}", Match: ${digitOfValues}`)
-              console.log(`[PARSE_DEBUG] ${paramName} - NameDigits: "${nameDigits}", NamePercents: "${namePercents}"`)
-            }
+            // Processing key metric values
           if ((values.includes('\n') && values.endsWith('%'))) {
             const valuesPair = values.split('\n', 3)
             if (valuesPair && valuesPair.length >= 2) {
@@ -2244,11 +2135,7 @@ tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
                     if (finalValue > 0 && isNegative)
                       finalValue = finalValue * -1
 
-                    if (assignField(nameDigits, finalValue, 'digitVal0')) {
-                      if (isKeyMetric) {
-                        console.log(`[PARSE_DEBUG] ${paramName} - Successfully parsed nameDigits: ${finalValue}`)
-                      }
-                    }
+                    assignField(nameDigits, finalValue, 'digitVal0')
                   } else {
                     assignField(nameDigits, 'error', 'digitVal0_validation_failed')
                     console.error(`[PARSE_ERROR] Validation failed for digitVal0 "${digitVal0}" in ${nameDigits}`)
@@ -2258,11 +2145,7 @@ tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
                   assignField(nameDigits, 'error', 'digitVal0_parse_error')
                 }
               } else {
-                if (assignField(nameDigits, valuesPair[0], 'raw_digitVal0')) {
-                  if (isKeyMetric) {
-                    console.log(`[PARSE_DEBUG] ${paramName} - Used raw value for nameDigits: "${valuesPair[0]}"`)
-                  }
-                }
+                assignField(nameDigits, valuesPair[0], 'raw_digitVal0')
               }
 
               if (Boolean(digitVal1)) {
@@ -2271,21 +2154,13 @@ tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
                   if (percentValue > 0 && isNegative)
                     percentValue = percentValue * -1
 
-                  if (assignField(namePercents, percentValue, 'digitVal1')) {
-                    if (isKeyMetric) {
-                      console.log(`[PARSE_DEBUG] ${paramName} - Successfully parsed namePercents: ${percentValue}`)
-                    }
-                  }
+                  assignField(namePercents, percentValue, 'digitVal1')
                 } catch (parseError) {
                   console.error(`[PARSE_ERROR] Failed to parse digitVal1 "${digitVal1}" for ${namePercents}:`, parseError)
                   assignField(namePercents, 'error', 'digitVal1_parse_error')
                 }
               } else {
-                if (assignField(namePercents, valuesPair[1], 'raw_digitVal1')) {
-                  if (isKeyMetric) {
-                    console.log(`[PARSE_DEBUG] ${paramName} - Used raw value for namePercents: "${valuesPair[1]}"`)
-                  }
-                }
+                assignField(namePercents, valuesPair[1], 'raw_digitVal1')
               }
             }
           } else if (Boolean(digitOfValues)) {
@@ -2299,11 +2174,7 @@ tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
                 if (finalValue > 0 && isNegative)
                   finalValue = finalValue * -1
 
-                if (assignField(nameDigits, finalValue, 'single_value')) {
-                  if (isKeyMetric) {
-                    console.log(`[PARSE_DEBUG] ${paramName} - Successfully parsed single value: ${finalValue}`)
-                  }
-                }
+                assignField(nameDigits, finalValue, 'single_value')
               } else {
                 assignField(nameDigits, 'error', 'single_value_validation_failed')
                 console.error(`[PARSE_ERROR] Validation failed for digitalValues "${digitalValues}" in ${nameDigits}`)
@@ -2313,11 +2184,7 @@ tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
               assignField(nameDigits, 'error', 'single_value_parse_error')
             }
           } else {
-            if (assignField(nameDigits, values, 'raw_string')) {
-              if (isKeyMetric) {
-                console.log(`[PARSE_DEBUG] ${paramName} - Used raw string value: "${values}"`)
-              }
-            }
+            assignField(nameDigits, values, 'raw_string')
           }
           } catch (cellError) {
             console.error(`[CELL_PARSE_ERROR] Failed to parse cell for ${paramName}:`, cellError)
@@ -2369,9 +2236,6 @@ tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
 
   // Note: Fallback extraction will be handled in parseReportTable if needed
 
-  // Log parsing statistics
-  console.log(`[PARSE_ROWS] Processed ${allReportRowsEl.length} rows: ${newFieldsAdded} new fields added, ${duplicatesSkipped} duplicates skipped`)
-
   // Log successful parsing of key metrics
   const keyFields = Object.keys(report).filter(key =>
     key.toLowerCase().includes('net profit') ||
@@ -2384,11 +2248,9 @@ tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
     console.warn('[PARSE_WARNING] No key metrics (Net profit, Gross profit, Gross loss) found in report')
 
     // If no key metrics found, log what we did find for debugging
-    const allFields = Object.keys(report)
-    if (allFields.length > 0) {
-      console.log('[PARSE_DEBUG] Fields that were found:', allFields.slice(0, 10)) // Show first 10
-    } else {
-      console.error('[PARSE_ERROR] No fields found at all - parsing completely failed')
+    // Check if parsing succeeded
+    if (Object.keys(report).length === 0) {
+      console.error('[PARSE_ERROR] No fields found - parsing failed')
     }
   }
 
@@ -2424,14 +2286,10 @@ tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
         )
 
         if (similarFields.length > 0) {
-          // Use the first similar field's value
           report[fieldName] = report[similarFields[0]]
-          console.log(`[CLEANUP] Replaced error in "${fieldName}" with value from "${similarFields[0]}": "${report[fieldName]}"`)
           cleanupCount++
         } else {
-          // Set to 0 for key metrics that should exist but failed to parse
           report[fieldName] = '0'
-          console.log(`[CLEANUP] Set error field "${fieldName}" to default value: 0`)
           cleanupCount++
         }
       }
@@ -2456,10 +2314,8 @@ tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
 
       if (alternativeFields.length > 0) {
         report[fieldName] = report[alternativeFields[0]]
-        console.log(`[CRITICAL_FIELD] Set "${fieldName}" to value from "${alternativeFields[0]}": "${report[fieldName]}"`)
       } else if (!report.hasOwnProperty(fieldName)) {
         report[fieldName] = '0'
-        console.log(`[CRITICAL_FIELD] Created missing field "${fieldName}" with default value: 0`)
       }
     }
   })
@@ -2554,13 +2410,8 @@ tv.parseReportTable = async (isDeepTest) => {
   const selHeader = isDeepTest ? SEL.strategyReportDeepTestHeader : SEL.strategyReportHeader
   const selRow = isDeepTest ? SEL.strategyReportDeepTestRow : SEL.strategyReportRow
 
-  // Wait for TradingView to finish loading data
-  console.log('[PARSE_TIMING] Waiting for TradingView data to load before parsing...')
-  await tv._waitForTradingViewDataLoad(1500)
-
-  // Additional delay to ensure data is fully populated
-  await new Promise(resolve => setTimeout(resolve, 500))
-  console.log('[PARSE_TIMING] Starting report parsing...')
+  // Fast data detection - no fixed delays
+  await tv._fastDataDetection(800)
 
   // Perform DOM inspection for debugging
   tv._inspectReportDOM(isDeepTest)
@@ -2613,10 +2464,8 @@ tv.parseReportTable = async (isDeepTest) => {
     baseDelay: 300
   })
 
-  console.log(`[PARSE_PHASE] Starting main table parsing with ${allReportRowsEl.length} rows`)
   report = tv._parseRows(allReportRowsEl, strategyHeaders, report)
   const mainParseFieldCount = Object.keys(report).length
-  console.log(`[PARSE_PHASE] Main table parsed: ${mainParseFieldCount} fields`)
 
   // Check if main parsing failed and try alternative method
   const mainParseErrorCount = Object.keys(report).filter(key => report[key] === 'error').length
@@ -2629,45 +2478,27 @@ tv.parseReportTable = async (isDeepTest) => {
     const altFieldCount = Object.keys(altReport).length
 
     if (altFieldCount > mainParseFieldCount) {
-      console.log(`[ALT_PARSE] Alternative parsing found ${altFieldCount} fields vs ${mainParseFieldCount}, using alternative results`)
       // Merge alternative results, prioritizing them over failed main results
       Object.keys(altReport).forEach(key => {
         if (altReport[key] && altReport[key] !== 'error') {
           report[key] = altReport[key]
         }
       })
-      console.log(`[PARSE_PHASE] After alternative merge: ${Object.keys(report).length} fields`)
     }
   }
 
   if (selStatus.isNewVersion) {
-    console.log(`[PARSE_PHASE] Starting tab parsing (new version UI)`)
-    const beforeTabsFieldCount = Object.keys(report).length
-
     const tabs = [
       [SEL.strategyTradeAnalysisTab, SEL.strategyTradeAnalysisTabActive, 'Trade Analysis'],
       [SEL.strategyRatiosTab, SEL.strategyRatiosTabActive, 'Ratios']]
 
     for (const [tabSelector, activeSelector, tabName] of tabs) {
-      console.log(`[PARSE_PHASE] Processing ${tabName} tab`)
-      const beforeTabFieldCount = Object.keys(report).length
 
       page.mouseClickSelector(tabSelector)
       const tabEl = await page.waitForSelector(activeSelector, 1000)
       if (tabEl) {
-        // Wait for tab switch to complete
-        await new Promise(resolve => setTimeout(resolve, 400))
-        console.log(`[PARSE_TIMING] ${tabName} tab activated, waiting for data to load...`)
-
-        // Wait for TradingView to load tab data
-        await tv._waitForTradingViewDataLoad(1000)
-
-        // Wait for tab content to be stable before parsing
-        await tv._waitForTabContentStable(tabName, selRow, 2000)
-
-        // Additional delay after stabilization
-        await new Promise(resolve => setTimeout(resolve, 200))
-        console.log(`[PARSE_TIMING] ${tabName} tab ready for parsing`)
+        // Fast tab stabilization - no fixed delays
+        await tv._fastTabStabilization(selRow, 600)
 
         // Wrap tab header and row parsing with retry logic
         const tabParsingResult = await tv.retryParsingOperation(async () => {
@@ -2690,31 +2521,14 @@ tv.parseReportTable = async (isDeepTest) => {
         })
 
         if (tabParsingResult.rows && tabParsingResult.rows.length !== 0) {
-          console.log(`[PARSE_PHASE] ${tabName} tab: parsing ${tabParsingResult.rows.length} rows`)
           report = tv._parseRows(tabParsingResult.rows, tabParsingResult.headers, report)
-          const afterTabFieldCount = Object.keys(report).length
-          const addedFields = afterTabFieldCount - beforeTabFieldCount
-          console.log(`[PARSE_PHASE] ${tabName} tab: added ${addedFields} fields (total: ${afterTabFieldCount})`)
-        } else {
-          console.log(`[PARSE_PHASE] ${tabName} tab: no rows found`)
         }
-      } else {
-        console.log(`[PARSE_PHASE] ${tabName} tab: failed to activate`)
       }
     }
 
     // Return to performance tab
-    console.log(`[PARSE_PHASE] Returning to Performance tab`)
     page.mouseClickSelector(SEL.strategyPerformanceTab)
     await page.waitForSelector(SEL.strategyPerformanceTabActive, 1000)
-
-    // Wait for Performance tab to load
-    await new Promise(resolve => setTimeout(resolve, 200))
-    console.log(`[PARSE_TIMING] Performance tab restored`)
-
-    const afterTabsFieldCount = Object.keys(report).length
-    const tabsAddedFields = afterTabsFieldCount - beforeTabsFieldCount
-    console.log(`[PARSE_PHASE] Tab parsing complete: added ${tabsAddedFields} fields from tabs (total: ${afterTabsFieldCount})`)
   }
 
   // Check if Net profit parsing failed and try fallback extraction
