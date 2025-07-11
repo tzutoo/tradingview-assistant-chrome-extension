@@ -328,12 +328,12 @@ tv.isRetryableParsingError = (error) => {
 };
 
 
-tv.getStrategy = async (strategyName = '', isIndicatorSave = false, isDeepTest = false) => {
+tv.getStrategy = async (strategyName = '', isIndicatorSave = false) => {
   // Ensure tv is properly initialized
   await tv._initialize()
 
   try {
-    await tv.openStrategyTab(isDeepTest)
+    await tv.openStrategyTab()
 
     // Fast data detection - no fixed delays
     await tv._fastDataDetection(1000)
@@ -441,9 +441,9 @@ tv.getStrategyParams = async (isIndicatorSave = false) => {
   return strategyInputs
 }
 
-tv.setStrategyParams = async (name, propVal, isDeepTest = false, keepStrategyParamOpen = false) => {
+tv.setStrategyParams = async (name, propVal, keepStrategyParamOpen = false) => {
 
-  const indicatorTitleEl = await tv.checkAndOpenStrategy(name, isDeepTest) // In test.name - ordinary strategy name but in strategyData.name short one as in indicator title
+  const indicatorTitleEl = await tv.checkAndOpenStrategy(name) // In test.name - ordinary strategy name but in strategyData.name short one as in indicator title
   if (!indicatorTitleEl)
     return null
   let popupVisibleHeight = 917
@@ -630,105 +630,11 @@ tv.openStrategyParameters = async (indicatorTitle, searchAgainstStrategies = fal
   return true
 }
 
-// Helper functions for new deep testing UI (2024/2025 TradingView interface changes)
-// TradingView changed deep testing from checkbox to date range button + "Entire history" dropdown
-tv._findDateRangeButton = async () => {
-  // Try primary selector first (dateRangeMenuWrapper)
-  let button = document.querySelector(SEL.strategyDeepTestDateRangeButton)
-  if (button) {
-    console.log('[INFO] Found date range button using primary selector')
-    return button
-  }
 
-  // Try fallback 1: button in deep-history area
-  button = document.querySelector(SEL.strategyDeepTestDateRangeButtonFallback1)
-  if (button) {
-    console.log('[INFO] Found date range button in deep-history area')
-    return button
-  }
-
-  // Try fallback 2: button with specific calendar SVG path (avoid :has() for compatibility)
-  const allMenuButtons = document.querySelectorAll('button[aria-haspopup="menu"]')
-  for (const btn of allMenuButtons) {
-    const svg = btn.querySelector('svg')
-    if (svg) {
-      const path = svg.querySelector('path')
-      if (path && path.getAttribute('d') && path.getAttribute('d').includes('M10 6h8V4h1v2h1.5A2.5 2.5 0 0 1 23 8.5v11a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 5 19.5v-11A2.5 2.5 0 0 1 7.5 6H9V4h1z')) {
-        console.log('[INFO] Found date range button by calendar SVG path')
-        return btn
-      }
-    }
-  }
-
-  // Try fallback 3: button with date range text pattern
-  for (const btn of allMenuButtons) {
-    const text = btn.textContent || btn.innerText || ''
-    if (text.includes('—') || text.includes('–') || /\d{4}.*—.*\d{4}/.test(text)) {
-      console.log(`[INFO] Found date range button by text pattern: "${text.substring(0, 50)}..."`)
-      return btn
-    }
-  }
-
-  // Try fallback 4: any button with menu popup in backtesting area
-  button = document.querySelector(SEL.strategyDeepTestDateRangeButtonFallback3)
-  if (button) {
-    console.log('[INFO] Found date range button in backtesting area (fallback)')
-    return button
-  }
-
-  return null
-}
-
-tv._findEntireHistoryOption = async () => {
-  // Try primary selector first (exact aria-label match)
-  let option = document.querySelector(SEL.strategyDeepTestEntireHistoryOption)
-  if (option) {
-    console.log('[INFO] Found "Entire history" option using primary selector (aria-label)')
-    return option
-  }
-
-  // Try fallback: search all menu items by text content
-  const allMenuItems = document.querySelectorAll('div[role="menuitemcheckbox"], div[role="menuitem"]')
-  console.log(`[DEBUG] Searching through ${allMenuItems.length} menu items for "Entire history"`)
-
-  for (const item of allMenuItems) {
-    const text = (item.textContent || item.innerText || '').trim().toLowerCase()
-    const ariaLabel = (item.getAttribute('aria-label') || '').toLowerCase()
-
-    // Check both text content and aria-label for various forms of "entire history"
-    if (text.includes('entire history') ||
-        ariaLabel.includes('entire history') ||
-        text === 'entire history' ||
-        ariaLabel === 'entire history') {
-      console.log(`[INFO] Found "Entire history" option by text/aria-label: "${text}" / "${ariaLabel}"`)
-      return item
-    }
-  }
-
-  // Additional fallback: look for partial matches
-  for (const item of allMenuItems) {
-    const text = (item.textContent || item.innerText || '').trim().toLowerCase()
-    const ariaLabel = (item.getAttribute('aria-label') || '').toLowerCase()
-
-    if ((text.includes('entire') && text.includes('history')) ||
-        (ariaLabel.includes('entire') && ariaLabel.includes('history'))) {
-      console.log(`[INFO] Found potential "Entire history" option by partial match: "${text}" / "${ariaLabel}"`)
-      return item
-    }
-  }
-
-  console.log('[DEBUG] No "Entire history" option found')
-  return null
-}
-
-tv._isNewDeepTestUIAvailable = async () => {
-  const dateRangeButton = await tv._findDateRangeButton()
-  return !!dateRangeButton
-}
 
 tv._findAndClickUpdateReportButton = async () => {
   // Check for the "Update report" snackbar notification
-  const snackbar = document.querySelector(SEL.strategyDeepTestUpdateReportSnackbar)
+  const snackbar = document.querySelector(SEL.strategyUpdateReportSnackbar)
   if (!snackbar) {
     return false // No update needed
   }
@@ -736,7 +642,7 @@ tv._findAndClickUpdateReportButton = async () => {
   console.log('[INFO] Found "Update report" snackbar notification')
 
   // Try primary selector for the update button
-  let updateButton = document.querySelector(SEL.strategyDeepTestUpdateReportButton)
+  let updateButton = document.querySelector(SEL.strategyUpdateReportButton)
   if (updateButton) {
     console.log('[INFO] Clicking "Update report" button')
     page.mouseClick(updateButton)
@@ -783,8 +689,8 @@ tv._waitForUpdateReportSuccess = async (timeout = 5000) => {
   const maxIterations = Math.floor(timeout / tick)
 
   // Cache selectors for performance
-  const toastSelector = SEL.strategyDeepTestUpdateReportSuccessToast
-  const fallbackSelector = SEL.strategyDeepTestUpdateReportSuccessToastFallback
+  const toastSelector = SEL.strategyUpdateReportSuccessToast
+  const fallbackSelector = SEL.strategyUpdateReportSuccessToastFallback
 
   for (let i = 0; i < maxIterations; i++) {
     // Fast check for success message - primary toast
@@ -814,7 +720,7 @@ tv._waitForUpdateReportSuccess = async (timeout = 5000) => {
 
     // Quick snackbar disappearance check (after 500ms)
     if (i > 10) {
-      const originalSnackbar = document.querySelector(SEL.strategyDeepTestUpdateReportSnackbar)
+      const originalSnackbar = document.querySelector(SEL.strategyUpdateReportSnackbar)
       if (!originalSnackbar) {
         return true
       }
@@ -828,6 +734,73 @@ tv._waitForUpdateReportSuccess = async (timeout = 5000) => {
 }
 
 /**
+ * Forces a report refresh to handle UI lag issues
+ * @returns {Promise<boolean>} - True if refresh was attempted
+ */
+tv._forceReportRefresh = async () => {
+  console.log('[FORCE_REFRESH] Attempting to force report refresh due to UI lag...')
+
+  try {
+    let refreshAttempted = false
+
+    // Method 1: If Performance Summary tab is not active, click it
+    const performanceTab = document.querySelector(SEL.strategyPerformanceTab)
+    const isPerformanceActive = document.querySelector(SEL.strategyPerformanceTabActive)
+
+    if (performanceTab && !isPerformanceActive) {
+      console.log('[FORCE_REFRESH] Activating Performance Summary tab...')
+      performanceTab.click()
+      await page.waitForTimeout(1500)
+      refreshAttempted = true
+    }
+
+    // Method 2: Switch to Strategy Tester tab and back to force refresh
+    const strategyTab = document.querySelector(SEL.strategyTesterTab)
+    if (strategyTab) {
+      console.log('[FORCE_REFRESH] Switching tabs to force refresh...')
+
+      // Click Strategy Tester tab
+      strategyTab.click()
+      await page.waitForTimeout(800)
+
+      // Click back to Performance Summary
+      const perfTab = document.querySelector(SEL.strategyPerformanceTab)
+      if (perfTab) {
+        perfTab.click()
+        await page.waitForTimeout(1500)
+        refreshAttempted = true
+      }
+    }
+
+    // Method 3: Try to trigger recalculation by scrolling the report area
+    if (!refreshAttempted) {
+      console.log('[FORCE_REFRESH] Trying scroll method to trigger refresh...')
+      const reportArea = document.querySelector(SEL.strategyReportObserveArea)
+      if (reportArea) {
+        reportArea.scrollTop = reportArea.scrollTop + 1
+        await page.waitForTimeout(100)
+        reportArea.scrollTop = reportArea.scrollTop - 1
+        await page.waitForTimeout(500)
+        refreshAttempted = true
+      }
+    }
+
+    if (refreshAttempted) {
+      console.log('[FORCE_REFRESH] Refresh attempted, waiting for UI to stabilize...')
+      await page.waitForTimeout(1000)
+      return true
+    } else {
+      console.log('[FORCE_REFRESH] No suitable refresh method found')
+      return false
+    }
+
+  } catch (error) {
+    console.log('[FORCE_REFRESH] Error during force refresh:', error.message)
+    return false
+  }
+}
+
+/**
  * Check for and click "Update report" button for regular reports
  * @returns {Promise<boolean>} - True if update button was found and clicked
  */
@@ -835,7 +808,7 @@ tv._checkAndClickRegularUpdateReportButton = async () => {
   console.log('[INFO] Checking for regular report update button...')
 
   // Check for the "Update report" snackbar notification (same selector as deep test)
-  const snackbar = document.querySelector(SEL.strategyDeepTestUpdateReportSnackbar)
+  const snackbar = document.querySelector(SEL.strategyUpdateReportSnackbar)
   if (!snackbar) {
     console.log('[INFO] No update report snackbar found for regular report')
     return false // No update needed
@@ -844,7 +817,7 @@ tv._checkAndClickRegularUpdateReportButton = async () => {
   console.log('[INFO] Found "Update report" snackbar for regular report')
 
   // Try to find and click the update button
-  let updateButton = document.querySelector(SEL.strategyDeepTestUpdateReportButton)
+  let updateButton = document.querySelector(SEL.strategyUpdateReportButton)
   if (updateButton) {
     console.log('[INFO] Clicking "Update report" button for regular report')
     page.mouseClick(updateButton)
@@ -886,7 +859,7 @@ tv._waitForRegularReportUpdate = async (timeout = 15000) => {
   for (let i = 0; i < maxIterations; i++) {
     try {
       // Check for toast notifications using the same selectors as deep test
-      const toastElements = document.querySelectorAll(SEL.strategyDeepTestUpdateReportSuccessToast)
+      const toastElements = document.querySelectorAll(SEL.strategyUpdateReportSuccessToast)
       for (const toast of toastElements) {
         const text = (toast.textContent || toast.innerText || '').toLowerCase()
 
@@ -914,7 +887,7 @@ tv._waitForRegularReportUpdate = async (timeout = 15000) => {
       }
 
       // Also check fallback elements
-      const fallbackElements = document.querySelectorAll(SEL.strategyDeepTestUpdateReportSuccessToastFallback)
+      const fallbackElements = document.querySelectorAll(SEL.strategyUpdateReportSuccessToastFallback)
       for (const element of fallbackElements) {
         const text = (element.textContent || element.innerText || '').toLowerCase()
 
@@ -1017,18 +990,17 @@ tv._fastDataDetection = async (timeout = 1000) => {
 
 /**
  * Wait for report to be fully populated with actual data
- * @param {boolean} isDeepTest - Whether this is deep test parsing
  * @param {number} timeout - Maximum time to wait in milliseconds
  * @returns {Promise<boolean>} - True if report appears to be populated
  */
-tv._waitForReportDataPopulation = async (isDeepTest, timeout = 10000) => {
+tv._waitForReportDataPopulation = async (timeout = 10000) => {
   console.log('[REPORT_WAIT] Waiting for report data population...')
 
   const startTime = Date.now()
   const tick = 200 // Check every 200ms
   const maxIterations = Math.floor(timeout / tick)
 
-  const selRow = isDeepTest ? SEL.strategyReportDeepTestRow : SEL.strategyReportRow
+  const selRow = SEL.strategyReportRow
 
   for (let i = 0; i < maxIterations; i++) {
     try {
@@ -1080,14 +1052,14 @@ tv._testUpdateReportSuccessDetection = async () => {
   console.log('[TEST] Testing update report success detection...')
 
   // Test the selectors
-  const toastElements = document.querySelectorAll(SEL.strategyDeepTestUpdateReportSuccessToast)
-  const fallbackElements = document.querySelectorAll(SEL.strategyDeepTestUpdateReportSuccessToastFallback)
+  const toastElements = document.querySelectorAll(SEL.strategyUpdateReportSuccessToast)
+  const fallbackElements = document.querySelectorAll(SEL.strategyUpdateReportSuccessToastFallback)
 
   console.log(`[TEST] Found ${toastElements.length} toast elements`)
   console.log(`[TEST] Found ${fallbackElements.length} fallback elements`)
 
   // Test if update snackbar is present
-  const updateSnackbar = document.querySelector(SEL.strategyDeepTestUpdateReportSnackbar)
+  const updateSnackbar = document.querySelector(SEL.strategyUpdateReportSnackbar)
   console.log(`[TEST] Update snackbar present: ${!!updateSnackbar}`)
 
   return {
@@ -1097,267 +1069,15 @@ tv._testUpdateReportSuccessDetection = async () => {
   }
 }
 
-// Test function for debugging deep testing UI detection
-tv._debugDeepTestUI = async () => {
-  console.log('[DEBUG] Testing deep test UI detection...')
 
-  // Test date range button detection
-  const dateRangeButton = await tv._findDateRangeButton()
-  console.log('[DEBUG] Date range button found:', !!dateRangeButton)
-  if (dateRangeButton) {
-    console.log('[DEBUG] Button text:', dateRangeButton.textContent || dateRangeButton.innerText)
-    console.log('[DEBUG] Button attributes:', {
-      'aria-haspopup': dateRangeButton.getAttribute('aria-haspopup'),
-      'aria-expanded': dateRangeButton.getAttribute('aria-expanded'),
-      'disabled': dateRangeButton.disabled,
-      'aria-disabled': dateRangeButton.getAttribute('aria-disabled')
-    })
-  }
 
-  // Test old UI detection
-  const oldCheckbox = page.$(SEL.strategyDeepTestCheckbox)
-  console.log('[DEBUG] Old checkbox found:', !!oldCheckbox)
 
-  // Test generate button
-  const generateBtn = page.$(SEL.strategyDeepTestGenerateBtn)
-  console.log('[DEBUG] Generate button found:', !!generateBtn)
 
-  return {
-    hasNewUI: !!dateRangeButton,
-    hasOldUI: !!oldCheckbox,
-    hasGenerateBtn: !!generateBtn
-  }
-}
-
-// Manual test function for dropdown interaction
-tv._testDropdownInteraction = async () => {
-  console.log('[DEBUG] Testing dropdown interaction manually...')
-
-  const dateRangeButton = await tv._findDateRangeButton()
-  if (!dateRangeButton) {
-    console.log('[ERROR] No date range button found')
-    return false
-  }
-
-  console.log('[DEBUG] Clicking date range button...')
-  page.mouseClick(dateRangeButton)
-
-  await page.waitForTimeout(1000)
-
-  console.log('[DEBUG] Looking for dropdown menu items...')
-  const allMenuItems = document.querySelectorAll('div[role="menuitemcheckbox"], div[role="menuitem"]')
-  console.log(`[DEBUG] Found ${allMenuItems.length} menu items:`)
-
-  for (let i = 0; i < allMenuItems.length; i++) {
-    const item = allMenuItems[i]
-    const text = (item.textContent || '').trim()
-    const ariaLabel = item.getAttribute('aria-label') || ''
-    console.log(`[DEBUG] Item ${i}: text="${text}", aria-label="${ariaLabel}"`)
-  }
-
-  const entireHistoryOption = await tv._findEntireHistoryOption()
-  console.log('[DEBUG] "Entire history" option found:', !!entireHistoryOption)
-
-  // Check for "Update report" snackbar
-  const updateSnackbar = document.querySelector(SEL.strategyDeepTestUpdateReportSnackbar)
-  console.log('[DEBUG] "Update report" snackbar found:', !!updateSnackbar)
-
-  if (updateSnackbar) {
-    const updateButton = document.querySelector(SEL.strategyDeepTestUpdateReportButton)
-    console.log('[DEBUG] "Update report" button found:', !!updateButton)
-  }
-
-  return !!entireHistoryOption
-}
-
-tv.setDeepTest = async (isDeepTest) => {
-  function isTurnedOn() {
-    return page.$(SEL.strategyDeepTestCheckboxChecked)
-  }
-
-  function isTurnedOff() {
-    return page.$(SEL.strategyDeepTestCheckboxUnchecked)
-  }
-
-  async function turnDeepModeOn() {
-    const switchTurnedOffEl = isTurnedOff()
-    if (switchTurnedOffEl)
-      switchTurnedOffEl.click() // page.mouseClick(switchTurnedOffEl)
-    const el = await page.waitForSelector(SEL.strategyDeepTestCheckboxChecked)
-    if (!el)
-      throw new Error('Can not switch to deep backtesting mode')
-  }
-
-  async function turnDeepModeOff() {
-    const switchTurnedOnEl = isTurnedOn()
-    if (switchTurnedOnEl)
-      switchTurnedOnEl.click() //page.mouseClick(switchTurnedOnEl) // // switchTurnedOnEl.click()
-    const el = await page.waitForSelector(SEL.strategyDeepTestCheckboxUnchecked)
-    if (!el)
-      throw new Error('Can not switch off from deep backtesting mode')
-  }
-
-  // New deep testing workflow for updated UI
-  async function turnNewDeepModeOn() {
-    console.log('[INFO] Using new deep testing UI workflow')
-
-    // Step 1: Find and click the date range button
-    const dateRangeButton = await tv._findDateRangeButton()
-    if (!dateRangeButton) {
-      throw new Error('Deep testing date range button not found. The TradingView interface may have changed. Please check if you have Premium subscription and the Strategy Tester is open.')
-    }
-
-    console.log('[DEBUG] Found date range button:', {
-      id: dateRangeButton.id,
-      className: dateRangeButton.className,
-      text: (dateRangeButton.textContent || '').substring(0, 100),
-      ariaExpanded: dateRangeButton.getAttribute('aria-expanded'),
-      ariaHaspopup: dateRangeButton.getAttribute('aria-haspopup')
-    })
-
-    // Verify button is clickable
-    if (dateRangeButton.disabled || dateRangeButton.getAttribute('aria-disabled') === 'true') {
-      throw new Error('Date range button is disabled. Please ensure the Strategy Tester is properly loaded.')
-    }
-
-    console.log('[INFO] Clicking date range button')
-    page.mouseClick(dateRangeButton)
-
-    // Wait a moment for the dropdown to appear
-    await page.waitForTimeout(500)
-
-    // Check if dropdown appeared by looking for aria-expanded change
-    const isExpanded = dateRangeButton.getAttribute('aria-expanded') === 'true'
-    console.log('[DEBUG] Button aria-expanded after click:', isExpanded)
-
-    // Step 2: Wait for dropdown with retry logic
-    let entireHistoryOption = null
-    let retryCount = 0
-    const maxRetries = 3
-
-    while (!entireHistoryOption && retryCount < maxRetries) {
-      await page.waitForTimeout(500) // Give dropdown time to appear
-
-      // Debug: log all menu items found
-      const allMenuItems = document.querySelectorAll('div[role="menuitemcheckbox"], div[role="menuitem"]')
-      console.log(`[DEBUG] Found ${allMenuItems.length} menu items:`)
-      for (let i = 0; i < Math.min(allMenuItems.length, 10); i++) {
-        const item = allMenuItems[i]
-        console.log(`  ${i}: "${(item.textContent || '').trim()}" (aria-label: "${item.getAttribute('aria-label') || 'none'}")`)
-      }
-
-      entireHistoryOption = await tv._findEntireHistoryOption()
-
-      if (!entireHistoryOption) {
-        retryCount++
-        console.log(`[INFO] "Entire history" option not found, retry ${retryCount}/${maxRetries}`)
-
-        if (retryCount < maxRetries) {
-          // Try clicking the button again
-          console.log('[INFO] Clicking date range button again...')
-          page.mouseClick(dateRangeButton)
-          await page.waitForTimeout(300)
-        }
-      }
-    }
-
-    if (!entireHistoryOption) {
-      // Final debug attempt - show what we can find
-      const allMenuItems = document.querySelectorAll('div[role="menuitemcheckbox"], div[role="menuitem"]')
-      const menuTexts = Array.from(allMenuItems).map(item => `"${(item.textContent || '').trim()}"`).join(', ')
-      throw new Error(`Could not find "Entire history" option in dropdown after ${maxRetries} attempts. Found menu items: ${menuTexts}. Please try manually clicking the date range button and selecting "Entire history".`)
-    }
-
-    // Verify option is clickable
-    if (entireHistoryOption.getAttribute('aria-disabled') === 'true') {
-      throw new Error('"Entire history" option is disabled. This may indicate insufficient data or subscription limitations.')
-    }
-
-    console.log('[INFO] Selecting "Entire history" option')
-    page.mouseClick(entireHistoryOption)
-
-    // Wait and verify the selection took effect
-    await page.waitForTimeout(1500)
-
-    // Check for "Update report" snackbar and click if present
-    const updateClicked = await tv._findAndClickUpdateReportButton()
-    if (updateClicked) {
-      console.log('[INFO] Update report button clicked and success confirmed')
-      // No additional timeout needed - success waiting is handled in _findAndClickUpdateReportButton
-    }
-
-    console.log('[INFO] Deep testing mode enabled using new UI')
-  }
-
-  if ((typeof selStatus.userDoNotHaveDeepBacktest === 'undefined' || selStatus.userDoNotHaveDeepBacktest) && !isDeepTest)
-    return // Do not check if user do not have userDoNotHaveDeepBacktest switch
-
-  if (selStatus.isNewVersion === false) {
-    console.log('[INFO] FOR PREVIOUS VERSION (Feb of 2025) DEEP BACKTEST SHOULD BE SET MANUALLY')
-    return
-  }
-
-  // Check if new UI is available first
-  const hasNewUI = await tv._isNewDeepTestUIAvailable()
-
-  if (hasNewUI) {
-    console.log('[INFO] Detected new deep testing UI')
-    if (!isDeepTest) {
-      console.log('[INFO] Deep testing disabled - no action needed for new UI')
-      return
-    }
-
-    try {
-      await turnNewDeepModeOn()
-      selStatus.userDoNotHaveDeepBacktest = false
-
-      // Validate that deep testing was actually enabled
-      await page.waitForTimeout(1000)
-      const generateBtn = page.$(SEL.strategyDeepTestGenerateBtn)
-      if (!generateBtn) {
-        console.log('[WARNING] Generate button not found after enabling deep testing')
-      } else {
-        console.log('[SUCCESS] Deep testing enabled successfully using new UI')
-      }
-
-      return
-    } catch (err) {
-      console.error('[ERROR] Failed to use new deep testing UI:', err.message)
-      console.log('[INFO] Attempting to fall back to legacy UI...')
-      // Fall through to try old UI as backup
-    }
-  }
-
-  // Fallback to old UI approach
-  console.log('[INFO] Using legacy deep testing UI')
-  let deepCheckboxEl = await page.waitForSelector(SEL.strategyDeepTestCheckbox, 2000)
-  if (!deepCheckboxEl) {
-    selStatus.userDoNotHaveDeepBacktest = true
-    if (isDeepTest) {
-      const errorMsg = hasNewUI
-        ? 'Both new and legacy deep testing UI failed. TradingView interface may have changed significantly. Please check if you have Premium subscription and try manually enabling deep testing.'
-        : 'Deep Backtesting mode switch not found. Do you have Premium subscription or may be TV UI changed?'
-      throw new Error(errorMsg)
-    }
-    return
-  } else {
-    selStatus.userDoNotHaveDeepBacktest = false
-  }
-
-  if (!isDeepTest) {
-    await turnDeepModeOff()
-    return
-  }
-  if (isTurnedOff())
-    await turnDeepModeOn()
-  // deepStartDate functionality removed - now using "Entire history" automatically
-}
-
-tv.checkAndOpenStrategy = async (name, isDeepTest = false) => {
+tv.checkAndOpenStrategy = async (name) => {
   let indicatorTitleEl = page.$(SEL.indicatorTitle)
   if (!indicatorTitleEl || indicatorTitleEl.innerText !== name) {
     try {
-      await tv.openStrategyTab(isDeepTest)
+      await tv.openStrategyTab()
     } catch (err) {
       console.warn('checkAndOpenStrategy error', err)
       return null
@@ -1399,7 +1119,7 @@ tv.checkIsNewVersion = async (timeout = 1000) => {
   console.warn('[WARN] Can able to detect current TV UI changes. Probably Deep mode set. Set it to new one')
 }
 
-tv.openStrategyTab = async (isDeepTest = false) => {
+tv.openStrategyTab = async () => {
   let isStrategyActiveEl = await page.waitForSelector(SEL.strategyTesterTabActive)
   if (!isStrategyActiveEl) {
     const strategyTabEl = await page.waitForSelector(SEL.strategyTesterTab)
@@ -1417,19 +1137,6 @@ tv.openStrategyTab = async (isDeepTest = false) => {
   await tv.checkIsNewVersion()
   let stratSummaryEl = await page.waitForSelector(SEL.strategyPerformanceTab, 1000)
   if (!stratSummaryEl) {
-    await tv.setDeepTest(isDeepTest)
-    if (isDeepTest) {
-      // Check if we're using the new UI where "Entire history" selection automatically generates the report
-      const hasNewUI = await tv._isNewDeepTestUIAvailable()
-      if (!hasNewUI) {
-        // Only click generate button for old UI
-        const generateBtnEl = page.$(SEL.strategyDeepTestGenerateBtn)
-        if (generateBtnEl)
-          page.mouseClick(generateBtnEl)
-      } else {
-        console.log('[INFO] New UI detected - report generation handled automatically by "Entire history" selection')
-      }
-    }
     stratSummaryEl = await page.waitForSelector(SEL.strategyPerformanceTab, 1000)
     if (!stratSummaryEl)
       throw new Error('There is not "Performance" tab on the page. Open correct page.' + SUPPORT_TEXT)
@@ -1444,8 +1151,8 @@ tv.openStrategyTab = async (isDeepTest = false) => {
   return true
 }
 
-tv.switchToStrategyTabAndSetObserveForReport = async (isDeepTest = false) => {
-  await tv.openStrategyTab(isDeepTest)
+tv.switchToStrategyTabAndSetObserveForReport = async () => {
+  await tv.openStrategyTab()
 
   const testResults = {}
   testResults.ticker = await tvChart.getTicker()
@@ -1453,7 +1160,7 @@ tv.switchToStrategyTabAndSetObserveForReport = async (isDeepTest = false) => {
   let strategyCaptionEl = document.querySelector(SEL.strategyCaption)
   testResults.name = strategyCaptionEl.getAttribute('data-strategy-title') //strategyCaptionEl.innerText
 
-  const reportEl = await page.waitForSelector(SEL.strategyReportObserveArea, 10000)
+
   if (!tv.reportNode) {
     // TODO When user switch to deep backtest or minimize window - it should be deleted and created again. Or delete observer after every test
     tv.reportNode = await page.waitForSelector(SEL.strategyReportObserveArea, 10000)
@@ -1473,25 +1180,7 @@ tv.switchToStrategyTabAndSetObserveForReport = async (isDeepTest = false) => {
     }
   }
 
-  if (isDeepTest) {
-    if (!tv.reportDeepNode) {
-      tv.reportDeepNode = await page.waitForSelector(SEL.strategyReportDeepTestObserveArea, 5000)
-      if (tv.reportDeepNode) {
-        const reportObserver = new MutationObserver(() => {
-          tv.isReportChanged = true
-        });
-        reportObserver.observe(tv.reportDeepNode, {
-          childList: true,
-          subtree: true,
-          attributes: false,
-          characterData: false
-        });
-        console.log('[INFO] Observer added to tv.reportDeepNode')
-      } else {
-        console.error('[INFO] The strategy deep report did not found.')
-      }
-    }
-  }
+
   return testResults
 }
 
@@ -1607,10 +1296,9 @@ tv.isParsed = false
 
 /**
  * Advanced DOM inspection to find report data using multiple strategies
- * @param {boolean} isDeepTest - Whether this is deep test parsing
  * @returns {Object} - Report data extracted using fallback methods
  */
-tv._extractReportDataWithFallbacks = async (isDeepTest) => {
+tv._extractReportDataWithFallbacks = async () => {
   console.log('[FALLBACK] Attempting advanced report data extraction...')
 
   const report = {}
@@ -1658,9 +1346,7 @@ tv._extractReportDataWithFallbacks = async (isDeepTest) => {
     async () => {
       console.log('[FALLBACK] Strategy 2: Text-based extraction')
       try {
-        const reportArea = document.querySelector(isDeepTest ?
-          '[class="backtesting deep-history"]' :
-          '#bottom-area div[class^="backtesting"]')
+        const reportArea = document.querySelector('#bottom-area div[class^="backtesting"]')
 
         if (reportArea) {
           const text = reportArea.textContent || reportArea.innerText
@@ -1763,14 +1449,13 @@ tv._validateParsedValue = (value, fieldName) => {
 
 /**
  * Alternative parsing method when normal DOM extraction fails
- * @param {boolean} isDeepTest - Whether this is deep test parsing
  * @returns {Object} - Report data extracted using alternative methods
  */
-tv._parseReportAlternative = (isDeepTest) => {
+tv._parseReportAlternative = () => {
   console.log('[ALT_PARSE] Attempting alternative parsing method...')
 
   const report = {}
-  const selRow = isDeepTest ? SEL.strategyReportDeepTestRow : SEL.strategyReportRow
+  const selRow = SEL.strategyReportRow
 
   // Try to find all table rows using multiple selectors
   const rowSelectors = [
@@ -2295,13 +1980,12 @@ tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
 
 /**
  * Comprehensive DOM inspection for debugging parsing issues
- * @param {boolean} isDeepTest - Whether this is deep test parsing
  */
-tv._inspectReportDOM = (isDeepTest) => {
+tv._inspectReportDOM = () => {
   console.log('[DOM_INSPECT] Starting comprehensive DOM inspection...')
 
-  const selHeader = isDeepTest ? SEL.strategyReportDeepTestHeader : SEL.strategyReportHeader
-  const selRow = isDeepTest ? SEL.strategyReportDeepTestRow : SEL.strategyReportRow
+  const selHeader = SEL.strategyReportHeader
+  const selRow = SEL.strategyReportRow
 
   // Check if selectors find elements
   const headers = document.querySelectorAll(selHeader)
@@ -2335,9 +2019,7 @@ tv._inspectReportDOM = (isDeepTest) => {
   }
 
   // Look for any tables in the report area
-  const reportArea = document.querySelector(isDeepTest ?
-    '[class="backtesting deep-history"]' :
-    '#bottom-area div[class^="backtesting"]')
+  const reportArea = document.querySelector('#bottom-area div[class^="backtesting"]')
 
   if (reportArea) {
     const tables = reportArea.querySelectorAll('table')
@@ -2375,20 +2057,20 @@ tv._inspectReportDOM = (isDeepTest) => {
   console.log(`[DOM_INSPECT] Total elements containing "Net profit": ${netProfitElements}`)
 }
 
-tv.parseReportTable = async (isDeepTest) => {
-  const selHeader = isDeepTest ? SEL.strategyReportDeepTestHeader : SEL.strategyReportHeader
-  const selRow = isDeepTest ? SEL.strategyReportDeepTestRow : SEL.strategyReportRow
+tv.parseReportTable = async () => {
+  const selHeader = SEL.strategyReportHeader
+  const selRow = SEL.strategyReportRow
 
   // Fast data detection - no fixed delays
   await tv._fastDataDetection(800)
 
   // Perform DOM inspection for debugging
-  tv._inspectReportDOM(isDeepTest)
+  tv._inspectReportDOM()
 
   await page.waitForSelector(selHeader, 2500)
 
   // Wrap header element selection with retry logic
-  const { allHeadersEl, strategyHeaders } = await tv.retryParsingOperation(async () => {
+  const { strategyHeaders } = await tv.retryParsingOperation(async () => {
     const headers = document.querySelectorAll(selHeader)
     if (!headers || !(headers.length === 4 || headers.length === 5)) { // 5 - Extra column for full screen
       if (!tv.isParsed)
@@ -2403,7 +2085,7 @@ tv.parseReportTable = async (isDeepTest) => {
         headerTexts.push(headerEl.innerText)
     }
 
-    return { allHeadersEl: headers, strategyHeaders: headerTexts }
+    return { strategyHeaders: headerTexts }
   }, {
     operationName: 'header element selection',
     isRetryableError: tv.isRetryableParsingError,
@@ -2443,7 +2125,7 @@ tv.parseReportTable = async (isDeepTest) => {
   if (mainParseSuccessRate < 30 || mainParseFieldCount === 0) {
     console.log(`[MAIN_PARSE] Low success rate (${mainParseSuccessRate.toFixed(1)}%) or no fields found, trying alternative parsing...`)
 
-    const altReport = tv._parseReportAlternative(isDeepTest)
+    const altReport = tv._parseReportAlternative()
     const altFieldCount = Object.keys(altReport).length
 
     if (altFieldCount > mainParseFieldCount) {
@@ -2507,7 +2189,7 @@ tv.parseReportTable = async (isDeepTest) => {
   if (hasNetProfitError || netProfitFields.length === 0) {
     console.log('[PARSE_FALLBACK] Net profit parsing failed or missing, attempting fallback extraction...')
     try {
-      const fallbackData = await tv._extractReportDataWithFallbacks(isDeepTest)
+      const fallbackData = await tv._extractReportDataWithFallbacks()
 
       // Merge fallback data into report
       Object.keys(fallbackData).forEach(key => {
@@ -2524,82 +2206,54 @@ tv.parseReportTable = async (isDeepTest) => {
   return report
 }
 
-tv.generateDeepTestReport = async () => { //loadingTime = 60000) => {
-  // Check if we're using the new UI where "Entire history" selection automatically generates the report
-  const hasNewUI = await tv._isNewDeepTestUIAvailable()
 
-  if (hasNewUI) {
-    console.log('[INFO] Using new deep testing UI - report should already be generated after "Entire history" selection')
 
-    // Check for "Update report" snackbar first
-    const updateClicked = await tv._findAndClickUpdateReportButton()
+
+/**
+ * Ensures the report is up-to-date before reading data
+ * @returns {Promise<boolean>} - True if report is current
+ */
+tv._ensureReportIsCurrent = async () => {
+  console.log('[REPORT_SYNC] Ensuring report is current before reading data...')
+
+  try {
+    // Check for "Update report" button and click if present
+    const updateClicked = await tv._checkAndClickRegularUpdateReportButton()
+
     if (updateClicked) {
-      console.log('[INFO] Update report button clicked and success confirmed')
-      // No additional timeout needed - success waiting is handled in _findAndClickUpdateReportButton
+      console.log('[REPORT_SYNC] Update report button found and clicked, waiting for completion...')
+      const updateSuccess = await tv._waitForUpdateReportSuccess(12000)
+      if (updateSuccess) {
+        console.log('[REPORT_SYNC] ✓ Report successfully updated to current state')
+        return true
+      } else {
+        console.log('[REPORT_SYNC] ⚠ Report update timeout, but continuing...')
+        return false
+      }
+    } else {
+      console.log('[REPORT_SYNC] No update report button found - report appears current')
+      return true
     }
-
-    // In the new UI, selecting "Entire history" automatically triggers the deep testing
-    // We just need to wait for the report to be ready, no generate button to click
-
-    // Check if report is already ready
-    const reportReady = page.$(SEL.strategyReportDeepTestReady)
-    if (reportReady) {
-      console.log('[INFO] Deep test report is already ready')
-      return ''
-    }
-
-    // Check if report is in progress
-    const reportInProgress = page.$(SEL.strategyReportDeepTestInProcess)
-    if (reportInProgress) {
-      console.log('[INFO] Deep test report is in progress, waiting...')
-      return ''
-    }
-
-    // If neither ready nor in progress, the report should have been generated automatically
-    console.log('[INFO] Deep test report generation completed automatically with new UI')
-    return ''
+  } catch (error) {
+    console.log('[REPORT_SYNC] Error during report sync:', error.message)
+    return false
   }
-
-  // Fallback to old UI logic
-  console.log('[INFO] Using legacy deep testing UI with generate button')
-  let generateBtnEl = await page.waitForSelector(SEL.strategyDeepTestGenerateBtn, 3000)
-  if (generateBtnEl) {
-    console.log('[INFO] Found deep test generate button, clicking...')
-    generateBtnEl.click()
-    await page.waitForSelector(SEL.strategyDeepTestGenerateBtnDisabled, 1000) // Some times is not started
-    let progressEl = await page.waitForSelector(SEL.strategyReportDeepTestInProcess, 1000)
-    generateBtnEl = await page.$(SEL.strategyDeepTestGenerateBtn)
-    if (!progressEl && generateBtnEl) { // Some time button changed, but returned
-      console.log('[INFO] Progress not detected, clicking generate button again...')
-      generateBtnEl.click()
-    }
-
-  } else if (page.$(SEL.strategyDeepTestGenerateBtnDisabled)) {
-    return 'Deep backtesting strategy parameters are not changed'
-  } else {
-    throw new Error('Error for generate deep backtesting report due the button is not exist.' + SUPPORT_TEXT)
-  }
-  return ''
 }
 
-
-tv.getPerformance = async (testResults, isIgnoreError = false) => {
+tv.getPerformance = async (testResults) => {
   // Ensure tv is properly initialized
   await tv._initialize()
+
+  // CRITICAL: Ensure report is current before reading any data
+  console.log('[PERFORMANCE] Ensuring report is current before reading performance data...')
+  await tv._ensureReportIsCurrent()
 
   let reportData = {}
   let message = ''
   let isProcessError = null
   let selProgress = SEL.strategyReportInProcess
   let selReady = SEL.strategyReportReady
-  const dataWaitingTime = testResults.isDeepTest ? testResults.dataLoadingTime * 2000 : testResults.dataLoadingTime * 1000
-  if (testResults.isDeepTest) {
-    message = await tv.generateDeepTestReport() //testResults.dataLoadingTime * 2000)
-    if (message)
-      isProcessError = true
-    selProgress = SEL.strategyReportDeepTestInProcess
-    selReady = SEL.strategyReportDeepTestReady
-  }
+  const dataWaitingTime = testResults.dataLoadingTime * 1000
 
   let isProcessStart = await page.waitForSelector(selProgress, 2500)
   let isProcessEnd = tv.isReportChanged
@@ -2647,9 +2301,9 @@ tv.getPerformance = async (testResults, isIgnoreError = false) => {
     // Additional small delay to ensure report is fully rendered
     await page.waitForTimeout(500)
 
-    reportData = await tv.parseReportTable(testResults.isDeepTest)
+    reportData = await tv.parseReportTable()
   }
-  if (!isProcessError && !isProcessEnd && testResults.perfomanceSummary.length && !testResults.isDeepTest) {
+  if (!isProcessError && !isProcessEnd && testResults.perfomanceSummary.length) {
     const lastRes = testResults.perfomanceSummary[testResults.perfomanceSummary.length - 1] // (!) Previous value maybe in testResults.filteredSummary
     if (reportData.hasOwnProperty(testResults.optParamName) && lastRes.hasOwnProperty(testResults.optParamName) &&
       reportData[testResults.optParamName] !== lastRes[testResults.optParamName]) {
@@ -2659,7 +2313,7 @@ tv.getPerformance = async (testResults, isIgnoreError = false) => {
   }
   if (reportData['comment'])
     message += '. ' + reportData['comment']
-  const comment = message ? message : testResults.isDeepTest ? 'Deep BT. ' : null
+  const comment = message ? message : null
   if (comment) {
     if (reportData['comment'])
       reportData['comment'] = comment ? comment + ' ' + reportData['comment'] : reportData['comment']

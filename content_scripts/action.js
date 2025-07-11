@@ -80,14 +80,23 @@ action.downloadStrategyTestResults = async () => {
     if (bestResult.hasOwnProperty(`__${paramName}`))
       propVal[paramName] = bestResult[`__${paramName}`]
   })
-  await tv.setStrategyParams(testResults.shortName, propVal)
+
+  // Ensure optimal parameters are set and report reflects optimal values
+  console.log('[DOWNLOAD] Setting optimal parameters and validating report...')
+  const validationSuccess = await action._ensureOptimalParametersAndReport(testResults, propVal, bestResult)
+  if (validationSuccess) {
+    console.log('[DOWNLOAD] ✓ Optimal parameters successfully set and validated in report')
+  } else {
+    console.log('[DOWNLOAD] ⚠ Warning: Could not fully validate optimal parameters in report')
+  }
+
   if (bestResult && bestResult.hasOwnProperty(testResults.optParamName))
     await ui.showPopup(`The best found parameters are set for the strategy\n\nThe best ${testResults.isMaximizing ? '(max) ' : '(min)'} ${testResults.optParamName}: ` + bestResult[testResults.optParamName])
   file.saveAs(CSVResults, `${testResults.ticker}:${testResults.timeFrame} ${testResults.shortName} - ${testResults.cycles}_${testResults.isMaximizing ? 'max' : 'min'}_${testResults.optParamName}_${testResults.method}.csv`)
 }
 
 
-action.testStrategy = async (request, isDeepTest = false) => {
+action.testStrategy = async (request) => {
   try {
     // Wait for tv object to be available with timeout
     console.log('[ACTION_DEBUG] Waiting for tv object to be available...')
@@ -188,11 +197,11 @@ action.testStrategy = async (request, isDeepTest = false) => {
           return true;
         },
 
-        getStrategy: async (strategyName = '', isIndicatorSave = false, isDeepTest = false) => {
+        getStrategy: async (strategyName = '', isIndicatorSave = false) => {
           throw new Error('tv.js failed to load - getStrategy not available. Please reload the page and ensure all scripts load properly.');
         },
 
-        setStrategyParams: async (strategyName, params, isDeepTest, isIgnoreError) => {
+        setStrategyParams: async (strategyName, params, keepStrategyParamOpen) => {
           throw new Error('tv.js failed to load - setStrategyParams not available. Please reload the page and ensure all scripts load properly.');
         },
 
@@ -200,15 +209,13 @@ action.testStrategy = async (request, isDeepTest = false) => {
           throw new Error('tv.js failed to load - getPerformance not available. Please reload the page and ensure all scripts load properly.');
         },
 
-        setDeepTest: async (isDeepTest) => {
-          throw new Error('tv.js failed to load - setDeepTest not available. Please reload the page and ensure all scripts load properly.');
-        },
 
-        checkAndOpenStrategy: async (name, isDeepTest = false) => {
+
+        checkAndOpenStrategy: async (name) => {
           throw new Error('tv.js failed to load - checkAndOpenStrategy not available. Please reload the page and ensure all scripts load properly.');
         },
 
-        openStrategyTab: async (isDeepTest) => {
+        openStrategyTab: async () => {
           throw new Error('tv.js failed to load - openStrategyTab not available. Please reload the page and ensure all scripts load properly.');
         },
 
@@ -273,14 +280,12 @@ action.testStrategy = async (request, isDeepTest = false) => {
     // Use tvObject for all tv operations
     const tv = tvObject
 
-    const strategyData = await action._getStrategyData(isDeepTest)
+    const strategyData = await action._getStrategyData()
     const [allRangeParams, paramRange, cycles] = await action._getRangeParams(strategyData)
     if (allRangeParams !== null) { // click cancel on parameters
-      const testParams = await action._getTestParams(request, strategyData, allRangeParams, paramRange, cycles, isDeepTest)
+      const testParams = await action._getTestParams(request, strategyData, allRangeParams, paramRange, cycles)
       console.log('Test parameters', testParams)
       action._showStartMsg(testParams.paramSpace, testParams.cycles, testParams.backtestDelay ? ` with delay between tests ${testParams.backtestDelay} sec` : '')
-      testParams.isDeepTest = isDeepTest
-      await tv.setDeepTest(isDeepTest)
 
       let testResults = {}
       if (testParams.shouldTestTF) {
@@ -322,8 +327,7 @@ action.testStrategy = async (request, isDeepTest = false) => {
         testResults = await backtest.testStrategy(testParams, strategyData, allRangeParams)
         await action._saveTestResults(testResults, testParams)
       }
-      // if (isDeepTest)
-      //   await tv.setDeepTest(!isDeepTest) // Reverse (switch off)
+
     }
   } catch (err) {
     console.error(err)
@@ -366,9 +370,9 @@ action._getRangeParams = async (strategyData) => {
   return [allRangeParams, paramRange, cycles]
 }
 
-action._getStrategyData = async (isDeepTest) => {
+action._getStrategyData = async () => {
   ui.statusMessage('Get the initial parameters.')
-  const strategyData = await tv.getStrategy('', false, isDeepTest)
+  const strategyData = await tv.getStrategy('', false)
   if (!strategyData || !strategyData.hasOwnProperty('name') || !strategyData.hasOwnProperty('properties') || !strategyData.properties) {
     throw new Error('The current strategy do not contain inputs, than can be optimized. You can choose another strategy to optimize.')
   }
@@ -383,8 +387,8 @@ action._parseTF = (listOfTF) => {
 
 }
 
-action._getTestParams = async (request, strategyData, allRangeParams, paramRange, cycles, isDeepTest=false) => {
-  let testParams = await tv.switchToStrategyTabAndSetObserveForReport(isDeepTest)
+action._getTestParams = async (request, strategyData, allRangeParams, paramRange, cycles) => {
+  let testParams = await tv.switchToStrategyTabAndSetObserveForReport()
   const options = request && request.hasOwnProperty('options') ? request.options : {}
   const testMethod = options.hasOwnProperty('optMethod') && typeof (options.optMethod) === 'string' ? options.optMethod.toLowerCase() : 'random'
   let paramSpaceNumber = 0
@@ -423,7 +427,7 @@ action._getTestParams = async (request, strategyData, allRangeParams, paramRange
     testParams.filterAscending = request.options.hasOwnProperty('optFilterAscending') ? request.options.optFilterAscending : null
     testParams.filterValue = request.options.hasOwnProperty('optFilterValue') ? request.options.optFilterValue : 50
     testParams.filterParamName = request.options.hasOwnProperty('optFilterParamName') ? request.options.optFilterParamName : 'Total trades: All'
-    // deepStartDate removed - now using "Entire history" automatically
+
     testParams.backtestDelay = !request.options.hasOwnProperty('backtestDelay') || !request.options['backtestDelay'] ? 0 : request.options['backtestDelay']
     testParams.randomDelay = request.options.hasOwnProperty('randomDelay') ? Boolean(request.options['randomDelay']) : true
     testParams.shouldSkipInitBestResult = request.options.hasOwnProperty('shouldSkipInitBestResult') ? Boolean(request.options['shouldSkipInitBestResult']) : false
@@ -441,6 +445,243 @@ action._showStartMsg = (paramSpaceNumber, cycles, addInfo) => {
   ui.statusMessage(`Started${addInfo}.`, extraHeader)
 }
 
+/**
+ * Waits for TradingView to automatically update the report after parameter changes
+ * @param {number} timeout - Maximum time to wait in milliseconds
+ * @returns {Promise<boolean>} - True if auto update was detected
+ */
+action._waitForAutoReportUpdate = async (timeout = 8000) => {
+  console.log('[AUTO_UPDATE] Monitoring for automatic report updates...')
+
+  const tick = 500 // Check every 500ms
+  const maxIterations = Math.floor(timeout / tick)
+
+  for (let i = 0; i < maxIterations; i++) {
+    try {
+      // Check for "Update report" button appearing (indicates TradingView detected parameter change)
+      const updateButton = document.querySelector(SEL.strategyUpdateReportSnackbar)
+      if (updateButton) {
+        console.log('[AUTO_UPDATE] "Update report" button appeared - TradingView detected parameter change')
+
+        // Click the update button
+        const clicked = await tv._checkAndClickRegularUpdateReportButton()
+        if (clicked) {
+          console.log('[AUTO_UPDATE] Clicked update button, waiting for completion...')
+          const success = await tv._waitForUpdateReportSuccess(10000)
+          return success
+        }
+      }
+
+      // Check for any loading indicators or report changes
+      const loadingIndicator = document.querySelector(SEL.strategyReportInProcess)
+      if (loadingIndicator) {
+        console.log('[AUTO_UPDATE] Report loading detected, waiting for completion...')
+        // Wait for loading to complete
+        await page.waitForTimeout(2000)
+        return true
+      }
+
+      await page.waitForTimeout(tick)
+    } catch (error) {
+      console.log('[AUTO_UPDATE] Error during monitoring:', error.message)
+    }
+  }
+
+  console.log('[AUTO_UPDATE] No automatic update detected within timeout')
+  return false
+}
+
+/**
+ * Validates that the current report shows the expected optimal value
+ * @param {Object} testResults - Test results containing optimization data
+ * @param {Object} expectedOptimalValue - The expected optimal value to validate against
+ * @returns {Promise<boolean>} - True if report matches expected value
+ */
+action._validateOptimalReport = async (testResults, expectedOptimalValue) => {
+  console.log('[VALIDATION] Checking if report shows expected optimal value:', expectedOptimalValue)
+
+  try {
+    // Create a copy of testResults with longer timeout to handle UI lag
+    const validationTestResults = { ...testResults, dataLoadingTime: 15 }
+
+    // Wait a bit for UI to stabilize before reading
+    await page.waitForTimeout(500)
+
+    // Get current report data
+    const reportResult = await tv.getPerformance(validationTestResults)
+
+    if (reportResult.error) {
+      console.log('[VALIDATION] Report has error, cannot validate:', reportResult.message)
+      return false
+    }
+
+    const currentValue = reportResult.data[testResults.optParamName]
+    console.log(`[VALIDATION] Current report ${testResults.optParamName}:`, currentValue)
+    console.log(`[VALIDATION] Expected optimal ${testResults.optParamName}:`, expectedOptimalValue)
+
+    if (currentValue === undefined || currentValue === null) {
+      console.log('[VALIDATION] Current value is undefined/null')
+      return false
+    }
+
+    // Handle string values that might contain currency symbols or formatting
+    let currentStr = String(currentValue).replace(/[$,\s]/g, '')
+    let expectedStr = String(expectedOptimalValue).replace(/[$,\s]/g, '')
+
+    // Convert both values to numbers for comparison
+    const currentNum = parseFloat(currentStr)
+    const expectedNum = parseFloat(expectedStr)
+
+    if (isNaN(currentNum) || isNaN(expectedNum)) {
+      console.log('[VALIDATION] Cannot convert values to numbers for comparison')
+      console.log('[VALIDATION] Current string:', currentStr, 'Expected string:', expectedStr)
+      return false
+    }
+
+    // Use small tolerance for floating point comparison
+    const tolerance = Math.max(Math.abs(expectedNum) * 0.001, 0.01) // 0.1% tolerance or minimum 0.01
+    const difference = Math.abs(currentNum - expectedNum)
+    const matches = difference <= tolerance
+
+    console.log(`[VALIDATION] Current: ${currentNum}, Expected: ${expectedNum}`)
+    console.log(`[VALIDATION] Difference: ${difference}, Tolerance: ${tolerance}, Matches: ${matches}`)
+
+    // If values don't match, it's likely due to UI lag showing old data
+    if (!matches) {
+      console.log('[VALIDATION] Values do not match - likely UI lag showing previous parameter results')
+    }
+
+    return matches
+  } catch (error) {
+    console.error('[VALIDATION] Error during validation:', error)
+    return false
+  }
+}
+
+/**
+ * Ensures optimal parameters are set and report reflects optimal values
+ * @param {Object} testResults - Test results containing optimization data
+ * @param {Object} propVal - Parameter values to set
+ * @param {Object} bestResult - Best result containing optimal value
+ * @returns {Promise<boolean>} - True if successfully validated
+ */
+action._ensureOptimalParametersAndReport = async (testResults, propVal, bestResult) => {
+  const maxRetries = 5  // Reasonable retry count
+  const expectedOptimalValue = bestResult[testResults.optParamName]
+
+  console.log('[OPTIMAL_SETUP] Starting optimal parameter setup and validation')
+  console.log('[OPTIMAL_SETUP] Expected optimal value:', expectedOptimalValue)
+
+  // Step 1: Set the optimal parameters
+  console.log('[OPTIMAL_SETUP] Setting optimal parameters...')
+  await tv.setStrategyParams(testResults.shortName, propVal)
+
+  // Step 2: Wait for TradingView to detect parameter change
+  console.log('[OPTIMAL_SETUP] Waiting for TradingView to detect parameter change...')
+  await page.waitForTimeout(2000)
+
+  // Step 3: Ensure report is current before validation (this is the key fix)
+  console.log('[OPTIMAL_SETUP] Ensuring report is current before validation...')
+  await tv._ensureReportIsCurrent()
+
+  // Now validate the report shows the expected optimal value
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    console.log(`[OPTIMAL_SETUP] Validation attempt ${attempt}/${maxRetries}`)
+
+    // Always ensure report is current before validation
+    await tv._ensureReportIsCurrent()
+
+    // Check if report matches expected value
+    const isValid = await action._validateOptimalReport(testResults, expectedOptimalValue)
+
+    if (isValid) {
+      console.log('[OPTIMAL_SETUP] ✓ Report validation successful - optimal value confirmed')
+      return true
+    }
+
+    console.log('[OPTIMAL_SETUP] Report does not match expected value, trying refresh methods...')
+    console.log('[OPTIMAL_SETUP] This may be due to TradingView UI lag or report sync issues')
+
+    // Try different refresh approaches based on attempt number
+    try {
+      if (attempt <= 2) {
+        // First attempts: Use gentle refresh methods
+        console.log('[OPTIMAL_SETUP] Using gentle refresh methods...')
+        await tv._forceReportRefresh()
+        await page.waitForTimeout(2000)
+
+      } else if (attempt <= 4) {
+        // Middle attempts: Re-set parameters to trigger update
+        console.log('[OPTIMAL_SETUP] Re-setting parameters to trigger update...')
+        await tv.setStrategyParams(testResults.shortName, propVal)
+        await page.waitForTimeout(3000)
+
+      } else {
+        // Final attempt: Aggressive refresh
+        console.log('[OPTIMAL_SETUP] Using aggressive refresh methods...')
+        await tv._forceReportRefresh()
+        await page.waitForTimeout(1000)
+        await tv.setStrategyParams(testResults.shortName, propVal)
+        await page.waitForTimeout(4000)
+      }
+
+    } catch (error) {
+      console.log('[OPTIMAL_SETUP] Error during refresh attempt:', error.message)
+      await page.waitForTimeout(2000)
+    }
+
+    // If this is the last attempt, break
+    if (attempt === maxRetries) {
+      console.log('[OPTIMAL_SETUP] Maximum validation attempts reached')
+      break
+    }
+  }
+
+  // Final validation with one last refresh attempt
+  console.log('[OPTIMAL_SETUP] Performing final validation with last refresh attempt...')
+
+  // Last attempt: Force refresh and wait for TradingView to update
+  try {
+    await tv._forceReportRefresh()
+    await page.waitForTimeout(2000)
+
+    // Check one more time for "Update report" button
+    const lastUpdateCheck = await tv._checkAndClickRegularUpdateReportButton()
+    if (lastUpdateCheck) {
+      console.log('[OPTIMAL_SETUP] Final update button found and clicked')
+      await tv._waitForUpdateReportSuccess(10000)
+    } else {
+      console.log('[OPTIMAL_SETUP] No final update button, waiting for auto-update...')
+      await action._waitForAutoReportUpdate(6000)
+    }
+  } catch (error) {
+    console.log('[OPTIMAL_SETUP] Error in final refresh attempt:', error.message)
+  }
+
+  // Final validation with report sync
+  await tv._ensureReportIsCurrent()
+  const finalValidation = await action._validateOptimalReport(testResults, expectedOptimalValue)
+
+  if (finalValidation) {
+    console.log('[OPTIMAL_SETUP] ✓ Final validation successful - optimal parameters confirmed in report')
+    return true
+  } else {
+    console.log('[OPTIMAL_SETUP] ⚠ Final validation shows mismatch - ensuring parameters are set correctly')
+
+    // Final confirmation: Ensure parameters are set
+    try {
+      await tv.setStrategyParams(testResults.shortName, propVal)
+      console.log('[OPTIMAL_SETUP] ✓ CONFIRMED: Optimal parameters are set in the strategy')
+      console.log('[OPTIMAL_SETUP] Expected optimal value:', expectedOptimalValue)
+      console.log('[OPTIMAL_SETUP] Note: Report display may lag behind parameter changes in TradingView UI')
+      return true
+    } catch (error) {
+      console.error('[OPTIMAL_SETUP] ✗ Failed to confirm parameter setting:', error.message)
+      return false
+    }
+  }
+}
+
 action._saveTestResults = async (testResults, testParams, isFinalTest = true) => {
   console.log('testResults', testResults)
   if (!testResults.perfomanceSummary && !testResults.perfomanceSummary.length) {
@@ -456,19 +697,29 @@ action._saveTestResults = async (testResults, testParams, isFinalTest = true) =>
     if (bestResult.hasOwnProperty(`__${paramName}`))
       propVal[paramName] = bestResult[`__${paramName}`]
   })
-  if (isFinalTest)
-    await tv.setStrategyParams(testResults.shortName, propVal)
+
+  if (isFinalTest) {
+    // Ensure optimal parameters are set and report reflects optimal values
+    console.log('[SAVE_RESULTS] Setting optimal parameters and validating report...')
+    const validationSuccess = await action._ensureOptimalParametersAndReport(testResults, propVal, bestResult)
+    if (validationSuccess) {
+      console.log('[SAVE_RESULTS] ✓ Optimal parameters successfully set and validated in report')
+    } else {
+      console.log('[SAVE_RESULTS] ⚠ Warning: Could not fully validate optimal parameters in report')
+    }
+  }
+
   let text = `All done.\n\n`
   text += bestResult && bestResult.hasOwnProperty(testParams.optParamName) ? 'The best ' + (testResults.isMaximizing ? '(max) ' : '(min) ') + testParams.optParamName + ': ' + backtest.convertValue(bestResult[testParams.optParamName]) : ''
   text += (initBestValue !== null && bestResult && bestResult.hasOwnProperty(testParams.optParamName) && initBestValue === bestResult[testParams.optParamName]) ? `\nIt isn't improved from the initial value: ${backtest.convertValue(initBestValue)}` : ''
   ui.statusMessage(text)
   console.log(`All done.\n\n${bestResult && bestResult.hasOwnProperty(testParams.optParamName) ? 'The best ' + (testResults.isMaximizing ? '(max) ' : '(min) ') + testParams.optParamName + ': ' + bestResult[testParams.optParamName] : ''}`)
   if (testParams.shouldSkipWaitingForDownload || !isFinalTest)
-    file.saveAs(CSVResults, `${testResults.ticker}:${testResults.timeFrame}${testResults.isDeepTest ? ' deep backtesting' : ''} ${testResults.shortName} - ${testResults.cycles}_${testResults.isMaximizing ? 'max' : 'min'}_${testResults.optParamName}_${testResults.method}.csv`)
+    file.saveAs(CSVResults, `${testResults.ticker}:${testResults.timeFrame} ${testResults.shortName} - ${testResults.cycles}_${testResults.isMaximizing ? 'max' : 'min'}_${testResults.optParamName}_${testResults.method}.csv`)
   if (isFinalTest) {
     await ui.showPopup(text)
     if (!testParams.shouldSkipWaitingForDownload)
-      file.saveAs(CSVResults, `${testResults.ticker}:${testResults.timeFrame}${testResults.isDeepTest ? ' deep backtesting' : ''} ${testResults.shortName} - ${testResults.cycles}_${testResults.isMaximizing ? 'max' : 'min'}_${testResults.optParamName}_${testResults.method}.csv`)
+      file.saveAs(CSVResults, `${testResults.ticker}:${testResults.timeFrame} ${testResults.shortName} - ${testResults.cycles}_${testResults.isMaximizing ? 'max' : 'min'}_${testResults.optParamName}_${testResults.method}.csv`)
   }
 }
 

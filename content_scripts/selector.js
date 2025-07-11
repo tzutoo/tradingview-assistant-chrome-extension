@@ -77,121 +77,29 @@ const SEL = {
       '#bottom-area  div[class^="backtesting"] div[class^="widgetContainer"] div[class^="reportContainer"] table tbody > tr'
   },
 
-  get strategyDeepTestCheckbox() {
-    return selStatus.isNewVersion ?
-      '[class="backtesting deep-history"] [class^="switchGroup"] [class^="switcher"] input' :
-      '#bottom-area div[class^="backtesting"]  [class^="deepHistoryContainer"]  [class^="switcher"] input'
-  },
-    get strategyDeepTestCheckboxUnchecked() {
-    return selStatus.isNewVersion ?
-      '[class="backtesting deep-history"] [class^="switchGroup"] [class^="switcher"] input:not([aria-checked="true"])' :
-      '#bottom-area div[class^="backtesting"]  [class^="deepHistoryContainer"]  [class^="switcher"] input'
-  },
-  get strategyDeepTestCheckboxChecked() {
-    return selStatus.isNewVersion ?
-      '[class="backtesting deep-history"] [class^="switchGroup"] [class^="switcher"] input[aria-checked="true"]' :
-      '#bottom-area div[class^="backtesting"]  [class^="deepHistoryContainer"]  [class^="switcher"] input'
-  },
-  // strategyDeepTestStartDate removed - now using "Entire history" automatically
-  get strategyDeepTestGenerateBtn() {
-    return selStatus.isNewVersion ?
-      '[class="backtesting deep-history"] [class^="historyParams"] button[class^="generateReportBtn"]:not([aria-disabled="true"])' :
-      '#bottom-area div[class^="backtesting"]  [class^="historyParams"] button[class^="generateReportBtn"]:not([disabled])'
-  },
-  get strategyDeepTestGenerateBtnDisabled() {
-    return selStatus.isNewVersion ?
-      '[class="backtesting deep-history"] [class^="historyParams"] button[class^="generateReportBtn"][aria-disabled="true"]' :
-      '#bottom-area div[class^="backtesting"]  [class^="historyParams"] button[class^="generateReportBtn"][disabled]'
-  },
-  get strategyReportDeepTestObserveArea() {
-    return selStatus.isNewVersion ?
-      '[class="backtesting deep-history"] > div:nth-child(1)' :
-      '#bottom-area div[class^="backtesting"] div[class^="backtesting-content-wrapper"]'
-  },
-  get strategyReportDeepTestInProcess() {
-    return selStatus.isNewVersion ?
-      '[class="backtesting deep-history"] > div:nth-child(1) div[role="progressbar"]' :
-      '#bottom-area div[class^="backtesting"] div[class^="backtesting-content-wrapper"] div[role="progressbar"]'
-  },
-  get strategyReportDeepTestReady() {
-    return selStatus.isNewVersion ?
-      '[class="backtesting deep-history"] > div:nth-child(1) div[class^="ka root"]' :
-      '#bottom-area div[class^="backtesting"] div[class^="backtesting-content-wrapper"] div[class^="reportContainer"] [class*="root"]'
-  },
-  get strategyReportDeepTestHeader() {
-    return selStatus.isNewVersion ?
-      '[class="backtesting deep-history"] > div:nth-child(1) div[class^="ka root"] table thead > tr > th' :
-      '#bottom-area div[class^="backtesting"] div[class^="backtesting-content-wrapper"] div[class^="reportContainer"] table thead > tr > th'
-  },
-  get strategyReportDeepTestRow() {
-    return selStatus.isNewVersion ?
-      '[class="backtesting deep-history"] > div:nth-child(1) div[class^="ka root"] table tbody > tr' :
-      '#bottom-area  div[class^="backtesting"] div[class^="backtesting-content-wrapper"] div[class^="reportContainer"] table tbody > tr'
-  },
 
-  // New selectors for updated TradingView deep testing UI (2024/2025 interface changes)
-  // TradingView changed from checkbox-based deep testing to date range button + dropdown selection
-  get strategyDeepTestDateRangeButton() {
-    // Primary selector: button in dateRangeMenuWrapper with calendar icon
-    return '.dateRangeMenuWrapper-ucbE4pMM button[aria-haspopup="menu"]'
-  },
 
-  get strategyDeepTestDateRangeButtonFallback1() {
-    // Fallback 1: button with calendar icon in deep-history area
-    return '[class*="deep-history"] button[aria-haspopup="menu"]'
-  },
-
-  get strategyDeepTestDateRangeButtonFallback2() {
-    // Fallback 2: any button with menu popup (will check SVG programmatically)
-    return 'button[aria-haspopup="menu"]'
-  },
-
-  get strategyDeepTestDateRangeButtonFallback3() {
-    // Fallback 3: any button with menu popup in backtesting area
-    return '[class*="backtesting"] button[aria-haspopup="menu"]'
-  },
-
-  get strategyDeepTestEntireHistoryOption() {
-    // Primary selector: menu item with exact aria-label
-    return 'div[role="menuitemcheckbox"][aria-label="Entire history"]'
-  },
-
-  get strategyDeepTestEntireHistoryOptionFallback1() {
-    // Fallback 1: menu item containing "Entire history" text (will be checked programmatically)
-    return 'div[role="menuitemcheckbox"]'
-  },
-
-  get strategyDeepTestEntireHistoryOptionFallback2() {
-    // Fallback 2: any menu item with "Entire history" text (broader search, will be checked programmatically)
-    return 'div[role="menuitemcheckbox"], div[role="menuitem"]'
-  },
-
-  get strategyDeepTestEntireHistoryOptionFallback3() {
-    // Fallback 3: menu items in dropdown (for manual selection)
-    return 'div[role="menuitemcheckbox"], div[role="menuitem"]'
-  },
-
-  get strategyDeepTestUpdateReportSnackbar() {
+  get strategyUpdateReportSnackbar() {
     // Snackbar notification for outdated report
     return '[data-qa-id="backtesting-updated-report-snackbar"]'
   },
 
-  get strategyDeepTestUpdateReportButton() {
+  get strategyUpdateReportButton() {
     // "Update report" button in the snackbar
     return '[data-qa-id="backtesting-updated-report-snackbar"] button'
   },
 
-  get strategyDeepTestUpdateReportButtonFallback() {
+  get strategyUpdateReportButtonFallback() {
     // Fallback: any button with "Update report" tooltip (will check text programmatically)
     return 'button[data-overflow-tooltip-text="Update report"]'
   },
 
-  get strategyDeepTestUpdateReportSuccessToast() {
+  get strategyUpdateReportSuccessToast() {
     // Success toast notification after report update
     return '[class*="toast"], [class*="snackbar"], [class*="notification"], [role="alert"], [role="status"]'
   },
 
-  get strategyDeepTestUpdateReportSuccessToastFallback() {
+  get strategyUpdateReportSuccessToastFallback() {
     // Fallback: any element that might contain success message
     return 'div[class*="message"], div[class*="alert"], div[class*="banner"]'
   },

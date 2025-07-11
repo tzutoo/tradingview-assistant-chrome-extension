@@ -273,9 +273,13 @@ backtest.getTestIterationResult = async (testResults, propVal, isIgnoreError = f
     tv.isReportChanged = false // Global value
     let startTime = new Date()
     if (!isIgnoreSetParam) {
-      const isParamsSet = await tv.setStrategyParams(testResults.shortName, propVal, testResults.isDeepTest, false)
+      const isParamsSet = await tv.setStrategyParams(testResults.shortName, propVal, false)
       if (!isParamsSet)
         return { error: 1, errMessage: 'The strategy parameters cannot be set', data: null }
+
+      // CRITICAL: After setting parameters, ensure report will be current
+      console.log('[BACKTEST_ITERATION] Parameters set, ensuring report will be current...')
+      await page.waitForTimeout(1000) // Give TradingView time to detect parameter change
     }
     const setTime = Math.round((new Date() - startTime) / 1000 * 10) / 10
     startTime = new Date()
