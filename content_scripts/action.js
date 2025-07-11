@@ -96,7 +96,7 @@ action.testStrategy = async (request, isDeepTest = false) => {
       console.log('Test parameters', testParams)
       action._showStartMsg(testParams.paramSpace, testParams.cycles, testParams.backtestDelay ? ` with delay between tests ${testParams.backtestDelay} sec` : '')
       testParams.isDeepTest = isDeepTest
-      await tv.setDeepTest(isDeepTest, testParams.deepStartDate)
+      await tv.setDeepTest(isDeepTest)
 
       let testResults = {}
       if (testParams.shouldTestTF) {
@@ -239,7 +239,7 @@ action._getTestParams = async (request, strategyData, allRangeParams, paramRange
     testParams.filterAscending = request.options.hasOwnProperty('optFilterAscending') ? request.options.optFilterAscending : null
     testParams.filterValue = request.options.hasOwnProperty('optFilterValue') ? request.options.optFilterValue : 50
     testParams.filterParamName = request.options.hasOwnProperty('optFilterParamName') ? request.options.optFilterParamName : 'Total trades: All'
-    testParams.deepStartDate = !request.options.hasOwnProperty('deepStartDate') || request.options['deepStartDate'] === '' ? null : request.options['deepStartDate']
+    // deepStartDate removed - now using "Entire history" automatically
     testParams.backtestDelay = !request.options.hasOwnProperty('backtestDelay') || !request.options['backtestDelay'] ? 0 : request.options['backtestDelay']
     testParams.randomDelay = request.options.hasOwnProperty('randomDelay') ? Boolean(request.options['randomDelay']) : true
     testParams.shouldSkipInitBestResult = request.options.hasOwnProperty('shouldSkipInitBestResult') ? Boolean(request.options['shouldSkipInitBestResult']) : false

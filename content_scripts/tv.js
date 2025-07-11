@@ -336,7 +336,214 @@ tv.openStrategyParameters = async (indicatorTitle, searchAgainstStrategies = fal
   return true
 }
 
-tv.setDeepTest = async (isDeepTest, deepStartDate = null) => {
+// Helper functions for new deep testing UI (2024/2025 TradingView interface changes)
+// TradingView changed deep testing from checkbox to date range button + "Entire history" dropdown
+tv._findDateRangeButton = async () => {
+  // Try primary selector first (dateRangeMenuWrapper)
+  let button = document.querySelector(SEL.strategyDeepTestDateRangeButton)
+  if (button) {
+    console.log('[INFO] Found date range button using primary selector')
+    return button
+  }
+
+  // Try fallback 1: button in deep-history area
+  button = document.querySelector(SEL.strategyDeepTestDateRangeButtonFallback1)
+  if (button) {
+    console.log('[INFO] Found date range button in deep-history area')
+    return button
+  }
+
+  // Try fallback 2: button with specific calendar SVG path (avoid :has() for compatibility)
+  const allMenuButtons = document.querySelectorAll('button[aria-haspopup="menu"]')
+  for (const btn of allMenuButtons) {
+    const svg = btn.querySelector('svg')
+    if (svg) {
+      const path = svg.querySelector('path')
+      if (path && path.getAttribute('d') && path.getAttribute('d').includes('M10 6h8V4h1v2h1.5A2.5 2.5 0 0 1 23 8.5v11a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 5 19.5v-11A2.5 2.5 0 0 1 7.5 6H9V4h1z')) {
+        console.log('[INFO] Found date range button by calendar SVG path')
+        return btn
+      }
+    }
+  }
+
+  // Try fallback 3: button with date range text pattern
+  for (const btn of allMenuButtons) {
+    const text = btn.textContent || btn.innerText || ''
+    if (text.includes('—') || text.includes('–') || /\d{4}.*—.*\d{4}/.test(text)) {
+      console.log(`[INFO] Found date range button by text pattern: "${text.substring(0, 50)}..."`)
+      return btn
+    }
+  }
+
+  // Try fallback 4: any button with menu popup in backtesting area
+  button = document.querySelector(SEL.strategyDeepTestDateRangeButtonFallback3)
+  if (button) {
+    console.log('[INFO] Found date range button in backtesting area (fallback)')
+    return button
+  }
+
+  return null
+}
+
+tv._findEntireHistoryOption = async () => {
+  // Try primary selector first (exact aria-label match)
+  let option = document.querySelector(SEL.strategyDeepTestEntireHistoryOption)
+  if (option) {
+    console.log('[INFO] Found "Entire history" option using primary selector (aria-label)')
+    return option
+  }
+
+  // Try fallback: search all menu items by text content
+  const allMenuItems = document.querySelectorAll('div[role="menuitemcheckbox"], div[role="menuitem"]')
+  console.log(`[DEBUG] Searching through ${allMenuItems.length} menu items for "Entire history"`)
+
+  for (const item of allMenuItems) {
+    const text = (item.textContent || item.innerText || '').trim().toLowerCase()
+    const ariaLabel = (item.getAttribute('aria-label') || '').toLowerCase()
+
+    // Check both text content and aria-label for various forms of "entire history"
+    if (text.includes('entire history') ||
+        ariaLabel.includes('entire history') ||
+        text === 'entire history' ||
+        ariaLabel === 'entire history') {
+      console.log(`[INFO] Found "Entire history" option by text/aria-label: "${text}" / "${ariaLabel}"`)
+      return item
+    }
+  }
+
+  // Additional fallback: look for partial matches
+  for (const item of allMenuItems) {
+    const text = (item.textContent || item.innerText || '').trim().toLowerCase()
+    const ariaLabel = (item.getAttribute('aria-label') || '').toLowerCase()
+
+    if ((text.includes('entire') && text.includes('history')) ||
+        (ariaLabel.includes('entire') && ariaLabel.includes('history'))) {
+      console.log(`[INFO] Found potential "Entire history" option by partial match: "${text}" / "${ariaLabel}"`)
+      return item
+    }
+  }
+
+  console.log('[DEBUG] No "Entire history" option found')
+  return null
+}
+
+tv._isNewDeepTestUIAvailable = async () => {
+  const dateRangeButton = await tv._findDateRangeButton()
+  return !!dateRangeButton
+}
+
+tv._findAndClickUpdateReportButton = async () => {
+  // Check for the "Update report" snackbar notification
+  const snackbar = document.querySelector(SEL.strategyDeepTestUpdateReportSnackbar)
+  if (!snackbar) {
+    return false // No update needed
+  }
+
+  console.log('[INFO] Found "Update report" snackbar notification')
+
+  // Try primary selector for the update button
+  let updateButton = document.querySelector(SEL.strategyDeepTestUpdateReportButton)
+  if (updateButton) {
+    console.log('[INFO] Clicking "Update report" button')
+    page.mouseClick(updateButton)
+
+    // Wait for the snackbar to disappear
+    await page.waitForTimeout(1000)
+    return true
+  }
+
+  // Fallback: search for button by text content
+  const allButtons = document.querySelectorAll('button')
+  for (const button of allButtons) {
+    const text = (button.textContent || '').trim().toLowerCase()
+    const tooltip = button.getAttribute('data-overflow-tooltip-text') || ''
+
+    if (text.includes('update report') || tooltip.includes('Update report')) {
+      console.log('[INFO] Found "Update report" button by text search, clicking...')
+      page.mouseClick(button)
+      await page.waitForTimeout(1000)
+      return true
+    }
+  }
+
+  console.log('[WARNING] Found update snackbar but could not find "Update report" button')
+  return false
+}
+
+// Test function for debugging deep testing UI detection
+tv._debugDeepTestUI = async () => {
+  console.log('[DEBUG] Testing deep test UI detection...')
+
+  // Test date range button detection
+  const dateRangeButton = await tv._findDateRangeButton()
+  console.log('[DEBUG] Date range button found:', !!dateRangeButton)
+  if (dateRangeButton) {
+    console.log('[DEBUG] Button text:', dateRangeButton.textContent || dateRangeButton.innerText)
+    console.log('[DEBUG] Button attributes:', {
+      'aria-haspopup': dateRangeButton.getAttribute('aria-haspopup'),
+      'aria-expanded': dateRangeButton.getAttribute('aria-expanded'),
+      'disabled': dateRangeButton.disabled,
+      'aria-disabled': dateRangeButton.getAttribute('aria-disabled')
+    })
+  }
+
+  // Test old UI detection
+  const oldCheckbox = page.$(SEL.strategyDeepTestCheckbox)
+  console.log('[DEBUG] Old checkbox found:', !!oldCheckbox)
+
+  // Test generate button
+  const generateBtn = page.$(SEL.strategyDeepTestGenerateBtn)
+  console.log('[DEBUG] Generate button found:', !!generateBtn)
+
+  return {
+    hasNewUI: !!dateRangeButton,
+    hasOldUI: !!oldCheckbox,
+    hasGenerateBtn: !!generateBtn
+  }
+}
+
+// Manual test function for dropdown interaction
+tv._testDropdownInteraction = async () => {
+  console.log('[DEBUG] Testing dropdown interaction manually...')
+
+  const dateRangeButton = await tv._findDateRangeButton()
+  if (!dateRangeButton) {
+    console.log('[ERROR] No date range button found')
+    return false
+  }
+
+  console.log('[DEBUG] Clicking date range button...')
+  page.mouseClick(dateRangeButton)
+
+  await page.waitForTimeout(1000)
+
+  console.log('[DEBUG] Looking for dropdown menu items...')
+  const allMenuItems = document.querySelectorAll('div[role="menuitemcheckbox"], div[role="menuitem"]')
+  console.log(`[DEBUG] Found ${allMenuItems.length} menu items:`)
+
+  for (let i = 0; i < allMenuItems.length; i++) {
+    const item = allMenuItems[i]
+    const text = (item.textContent || '').trim()
+    const ariaLabel = item.getAttribute('aria-label') || ''
+    console.log(`[DEBUG] Item ${i}: text="${text}", aria-label="${ariaLabel}"`)
+  }
+
+  const entireHistoryOption = await tv._findEntireHistoryOption()
+  console.log('[DEBUG] "Entire history" option found:', !!entireHistoryOption)
+
+  // Check for "Update report" snackbar
+  const updateSnackbar = document.querySelector(SEL.strategyDeepTestUpdateReportSnackbar)
+  console.log('[DEBUG] "Update report" snackbar found:', !!updateSnackbar)
+
+  if (updateSnackbar) {
+    const updateButton = document.querySelector(SEL.strategyDeepTestUpdateReportButton)
+    console.log('[DEBUG] "Update report" button found:', !!updateButton)
+  }
+
+  return !!entireHistoryOption
+}
+
+tv.setDeepTest = async (isDeepTest) => {
   function isTurnedOn() {
     return page.$(SEL.strategyDeepTestCheckboxChecked)
   }
@@ -363,6 +570,98 @@ tv.setDeepTest = async (isDeepTest, deepStartDate = null) => {
       throw new Error('Can not switch off from deep backtesting mode')
   }
 
+  // New deep testing workflow for updated UI
+  async function turnNewDeepModeOn() {
+    console.log('[INFO] Using new deep testing UI workflow')
+
+    // Step 1: Find and click the date range button
+    const dateRangeButton = await tv._findDateRangeButton()
+    if (!dateRangeButton) {
+      throw new Error('Deep testing date range button not found. The TradingView interface may have changed. Please check if you have Premium subscription and the Strategy Tester is open.')
+    }
+
+    console.log('[DEBUG] Found date range button:', {
+      id: dateRangeButton.id,
+      className: dateRangeButton.className,
+      text: (dateRangeButton.textContent || '').substring(0, 100),
+      ariaExpanded: dateRangeButton.getAttribute('aria-expanded'),
+      ariaHaspopup: dateRangeButton.getAttribute('aria-haspopup')
+    })
+
+    // Verify button is clickable
+    if (dateRangeButton.disabled || dateRangeButton.getAttribute('aria-disabled') === 'true') {
+      throw new Error('Date range button is disabled. Please ensure the Strategy Tester is properly loaded.')
+    }
+
+    console.log('[INFO] Clicking date range button')
+    page.mouseClick(dateRangeButton)
+
+    // Wait a moment for the dropdown to appear
+    await page.waitForTimeout(500)
+
+    // Check if dropdown appeared by looking for aria-expanded change
+    const isExpanded = dateRangeButton.getAttribute('aria-expanded') === 'true'
+    console.log('[DEBUG] Button aria-expanded after click:', isExpanded)
+
+    // Step 2: Wait for dropdown with retry logic
+    let entireHistoryOption = null
+    let retryCount = 0
+    const maxRetries = 3
+
+    while (!entireHistoryOption && retryCount < maxRetries) {
+      await page.waitForTimeout(500) // Give dropdown time to appear
+
+      // Debug: log all menu items found
+      const allMenuItems = document.querySelectorAll('div[role="menuitemcheckbox"], div[role="menuitem"]')
+      console.log(`[DEBUG] Found ${allMenuItems.length} menu items:`)
+      for (let i = 0; i < Math.min(allMenuItems.length, 10); i++) {
+        const item = allMenuItems[i]
+        console.log(`  ${i}: "${(item.textContent || '').trim()}" (aria-label: "${item.getAttribute('aria-label') || 'none'}")`)
+      }
+
+      entireHistoryOption = await tv._findEntireHistoryOption()
+
+      if (!entireHistoryOption) {
+        retryCount++
+        console.log(`[INFO] "Entire history" option not found, retry ${retryCount}/${maxRetries}`)
+
+        if (retryCount < maxRetries) {
+          // Try clicking the button again
+          console.log('[INFO] Clicking date range button again...')
+          page.mouseClick(dateRangeButton)
+          await page.waitForTimeout(300)
+        }
+      }
+    }
+
+    if (!entireHistoryOption) {
+      // Final debug attempt - show what we can find
+      const allMenuItems = document.querySelectorAll('div[role="menuitemcheckbox"], div[role="menuitem"]')
+      const menuTexts = Array.from(allMenuItems).map(item => `"${(item.textContent || '').trim()}"`).join(', ')
+      throw new Error(`Could not find "Entire history" option in dropdown after ${maxRetries} attempts. Found menu items: ${menuTexts}. Please try manually clicking the date range button and selecting "Entire history".`)
+    }
+
+    // Verify option is clickable
+    if (entireHistoryOption.getAttribute('aria-disabled') === 'true') {
+      throw new Error('"Entire history" option is disabled. This may indicate insufficient data or subscription limitations.')
+    }
+
+    console.log('[INFO] Selecting "Entire history" option')
+    page.mouseClick(entireHistoryOption)
+
+    // Wait and verify the selection took effect
+    await page.waitForTimeout(1500)
+
+    // Check for "Update report" snackbar and click if present
+    const updateClicked = await tv._findAndClickUpdateReportButton()
+    if (updateClicked) {
+      console.log('[INFO] Clicked "Update report" button, waiting for report to update...')
+      await page.waitForTimeout(2000) // Give more time for report to update
+    }
+
+    console.log('[INFO] Deep testing mode enabled using new UI')
+  }
+
   if ((typeof selStatus.userDoNotHaveDeepBacktest === 'undefined' || selStatus.userDoNotHaveDeepBacktest) && !isDeepTest)
     return // Do not check if user do not have userDoNotHaveDeepBacktest switch
 
@@ -371,11 +670,48 @@ tv.setDeepTest = async (isDeepTest, deepStartDate = null) => {
     return
   }
 
-  let deepCheckboxEl = await page.waitForSelector(SEL.strategyDeepTestCheckbox)
+  // Check if new UI is available first
+  const hasNewUI = await tv._isNewDeepTestUIAvailable()
+
+  if (hasNewUI) {
+    console.log('[INFO] Detected new deep testing UI')
+    if (!isDeepTest) {
+      console.log('[INFO] Deep testing disabled - no action needed for new UI')
+      return
+    }
+
+    try {
+      await turnNewDeepModeOn()
+      selStatus.userDoNotHaveDeepBacktest = false
+
+      // Validate that deep testing was actually enabled
+      await page.waitForTimeout(1000)
+      const generateBtn = page.$(SEL.strategyDeepTestGenerateBtn)
+      if (!generateBtn) {
+        console.log('[WARNING] Generate button not found after enabling deep testing')
+      } else {
+        console.log('[SUCCESS] Deep testing enabled successfully using new UI')
+      }
+
+      return
+    } catch (err) {
+      console.error('[ERROR] Failed to use new deep testing UI:', err.message)
+      console.log('[INFO] Attempting to fall back to legacy UI...')
+      // Fall through to try old UI as backup
+    }
+  }
+
+  // Fallback to old UI approach
+  console.log('[INFO] Using legacy deep testing UI')
+  let deepCheckboxEl = await page.waitForSelector(SEL.strategyDeepTestCheckbox, 2000)
   if (!deepCheckboxEl) {
     selStatus.userDoNotHaveDeepBacktest = true
-    if (isDeepTest)
-      throw new Error('Deep Backtesting mode switch not found. Do you have Premium subscription or may be TV UI changed?')
+    if (isDeepTest) {
+      const errorMsg = hasNewUI
+        ? 'Both new and legacy deep testing UI failed. TradingView interface may have changed significantly. Please check if you have Premium subscription and try manually enabling deep testing.'
+        : 'Deep Backtesting mode switch not found. Do you have Premium subscription or may be TV UI changed?'
+      throw new Error(errorMsg)
+    }
     return
   } else {
     selStatus.userDoNotHaveDeepBacktest = false
@@ -387,12 +723,7 @@ tv.setDeepTest = async (isDeepTest, deepStartDate = null) => {
   }
   if (isTurnedOff())
     await turnDeepModeOn()
-  if (deepStartDate) {
-    const startDateEl = await page.waitForSelector(SEL.strategyDeepTestStartDate)
-    if (startDateEl) {
-      page.setInputElementValue(startDateEl, deepStartDate)
-    }
-  }
+  // deepStartDate functionality removed - now using "Entire history" automatically
 }
 
 tv.checkAndOpenStrategy = async (name, isDeepTest = false) => {
@@ -461,9 +792,16 @@ tv.openStrategyTab = async (isDeepTest = false) => {
   if (!stratSummaryEl) {
     await tv.setDeepTest(isDeepTest)
     if (isDeepTest) {
-      const generateBtnEl = page.$(SEL.strategyDeepTestGenerateBtn)
-      if (generateBtnEl)
-        page.mouseClick(generateBtnEl)
+      // Check if we're using the new UI where "Entire history" selection automatically generates the report
+      const hasNewUI = await tv._isNewDeepTestUIAvailable()
+      if (!hasNewUI) {
+        // Only click generate button for old UI
+        const generateBtnEl = page.$(SEL.strategyDeepTestGenerateBtn)
+        if (generateBtnEl)
+          page.mouseClick(generateBtnEl)
+      } else {
+        console.log('[INFO] New UI detected - report generation handled automatically by "Entire history" selection')
+      }
     }
     stratSummaryEl = await page.waitForSelector(SEL.strategyPerformanceTab, 1000)
     if (!stratSummaryEl)
@@ -763,14 +1101,52 @@ tv.parseReportTable = async (isDeepTest) => {
 }
 
 tv.generateDeepTestReport = async () => { //loadingTime = 60000) => {
-  let generateBtnEl = await page.waitForSelector(SEL.strategyDeepTestGenerateBtn)
+  // Check if we're using the new UI where "Entire history" selection automatically generates the report
+  const hasNewUI = await tv._isNewDeepTestUIAvailable()
+
+  if (hasNewUI) {
+    console.log('[INFO] Using new deep testing UI - report should already be generated after "Entire history" selection')
+
+    // Check for "Update report" snackbar first
+    const updateClicked = await tv._findAndClickUpdateReportButton()
+    if (updateClicked) {
+      console.log('[INFO] Found and clicked "Update report" button, waiting for report to update...')
+      await page.waitForTimeout(2000)
+    }
+
+    // In the new UI, selecting "Entire history" automatically triggers the deep testing
+    // We just need to wait for the report to be ready, no generate button to click
+
+    // Check if report is already ready
+    const reportReady = page.$(SEL.strategyReportDeepTestReady)
+    if (reportReady) {
+      console.log('[INFO] Deep test report is already ready')
+      return ''
+    }
+
+    // Check if report is in progress
+    const reportInProgress = page.$(SEL.strategyReportDeepTestInProcess)
+    if (reportInProgress) {
+      console.log('[INFO] Deep test report is in progress, waiting...')
+      return ''
+    }
+
+    // If neither ready nor in progress, the report should have been generated automatically
+    console.log('[INFO] Deep test report generation completed automatically with new UI')
+    return ''
+  }
+
+  // Fallback to old UI logic
+  console.log('[INFO] Using legacy deep testing UI with generate button')
+  let generateBtnEl = await page.waitForSelector(SEL.strategyDeepTestGenerateBtn, 3000)
   if (generateBtnEl) {
-    // page.mouseClick(generateBtnEl) // // generateBtnEl.click()
+    console.log('[INFO] Found deep test generate button, clicking...')
     generateBtnEl.click()
     await page.waitForSelector(SEL.strategyDeepTestGenerateBtnDisabled, 1000) // Some times is not started
     let progressEl = await page.waitForSelector(SEL.strategyReportDeepTestInProcess, 1000)
     generateBtnEl = await page.$(SEL.strategyDeepTestGenerateBtn)
     if (!progressEl && generateBtnEl) { // Some time button changed, but returned
+      console.log('[INFO] Progress not detected, clicking generate button again...')
       generateBtnEl.click()
     }
 

@@ -24,7 +24,7 @@ function setOptionsEvents() {
     }
     document.getElementById(elId).addEventListener('click', saveOptListener)
   }
-  for(let elId of ['deepStartDate', 'backtestDelay', 'dataLoadingTime', 'listOfTF']) {
+  for(let elId of ['backtestDelay', 'dataLoadingTime', 'listOfTF']) {
     function saveOptListener() {
       saveOptions(elId)
     }
@@ -103,8 +103,7 @@ function setPopupInputsByOptions(getResults) {
       if (document.getElementById('optFilterParamName') && iondvOptions.hasOwnProperty('optFilterParamName'))
         document.getElementById('optFilterParamName').value = iondvOptions.optFilterParamName
 
-      if(document.getElementById('deepStartDate') && iondvOptions.hasOwnProperty('deepStartDate'))
-        document.getElementById('deepStartDate').value = iondvOptions.deepStartDate
+
       if(document.getElementById('dataLoadingTime') && iondvOptions.hasOwnProperty('dataLoadingTime')) {
         document.getElementById('dataLoadingTime').value = iondvOptions.dataLoadingTime !== null ? iondvOptions.dataLoadingTime : 30
       }
@@ -148,16 +147,7 @@ function getOptions(signal) {
   iondvOptions.optFilterAscending  = document.getElementById('optFilterMore').checked ? true : document.getElementById('optFilterLess').checked ? false : null
   iondvOptions.optFilterValue = document.getElementById('optFilterValue').value || '50'
   iondvOptions.optFilterParamName = document.getElementById('optFilterParamName').value || 'Total Closed Trades: All'
-  const deepStartDateEl = document.getElementById('deepStartDate')
-  if (deepStartDateEl) {
-    if (deepStartDateEl.value === '' || (deepStartDateEl.value && deepStartDateEl.value.match(/^20\d{2}-[0-1][0-9]-[0-3][0-9]/))) {
-      deepStartDateEl.style.removeProperty('color')
-      iondvOptions.deepStartDate = deepStartDateEl.value
-    } else {
-      deepStartDateEl.style.setProperty('color', 'red')
-      iondvOptions.deepStartDate = null
-    }
-  }
+  // deepStartDate removed - now using "Entire history" automatically
   if(document.getElementById('dataLoadingTime')) {
     const dataLoadingTime =  document.getElementById('dataLoadingTime').value
     iondvOptions.dataLoadingTime = dataLoadingTime === '' ? null : isNaN(parseInt(dataLoadingTime)) ? 45 : Math.abs(parseInt(dataLoadingTime))
