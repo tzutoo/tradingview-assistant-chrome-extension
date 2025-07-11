@@ -741,15 +741,14 @@ tv._findAndClickUpdateReportButton = async () => {
     console.log('[INFO] Clicking "Update report" button')
     page.mouseClick(updateButton)
 
-    // Wait for success notification instead of fixed timeout
-    const success = await tv._waitForUpdateReportSuccess()
+    // Wait for success notification - immediate parsing when detected
+    const success = await tv._waitForUpdateReportSuccess(3000) // Reduced timeout
     if (success) {
-      console.log('[INFO] Update report completed successfully')
+      console.log('[INFO] Update report success detected - ready for parsing')
       return true
     } else {
-      console.log('[WARNING] Update report may not have completed successfully, falling back to timeout')
-      await page.waitForTimeout(1000) // Fallback to original behavior
-      return true // Return true to maintain backward compatibility
+      console.log('[WARNING] Update timeout - proceeding anyway')
+      return true // Proceed anyway
     }
   }
 
@@ -763,15 +762,14 @@ tv._findAndClickUpdateReportButton = async () => {
       console.log('[INFO] Found "Update report" button by text search, clicking...')
       page.mouseClick(button)
 
-      // Wait for success notification instead of fixed timeout
-      const success = await tv._waitForUpdateReportSuccess()
+      // Wait for success notification - immediate parsing when detected
+      const success = await tv._waitForUpdateReportSuccess(3000) // Reduced timeout
       if (success) {
-        console.log('[INFO] Update report completed successfully (fallback method)')
+        console.log('[INFO] Update report success detected (fallback method)')
         return true
       } else {
-        console.log('[WARNING] Update report may not have completed successfully (fallback method), using timeout')
-        await page.waitForTimeout(1000) // Fallback to original behavior
-        return true // Return true to maintain backward compatibility
+        console.log('[WARNING] Update timeout (fallback method) - proceeding anyway')
+        return true // Proceed anyway
       }
     }
   }
@@ -780,75 +778,53 @@ tv._findAndClickUpdateReportButton = async () => {
   return false
 }
 
-tv._waitForUpdateReportSuccess = async (timeout = 10000) => {
-  console.log('[INFO] Waiting for "The report has been updated successfully" notification...')
-
-  const startTime = Date.now()
-  const tick = 100 // Check every 100ms
+tv._waitForUpdateReportSuccess = async (timeout = 5000) => {
+  const tick = 50 // Faster polling - check every 50ms
   const maxIterations = Math.floor(timeout / tick)
 
+  // Cache selectors for performance
+  const toastSelector = SEL.strategyDeepTestUpdateReportSuccessToast
+  const fallbackSelector = SEL.strategyDeepTestUpdateReportSuccessToastFallback
+
   for (let i = 0; i < maxIterations; i++) {
-    try {
-      // Check for success message in toast notifications
-      const toastElements = document.querySelectorAll(SEL.strategyDeepTestUpdateReportSuccessToast)
-      for (const toast of toastElements) {
-        const text = (toast.textContent || toast.innerText || '').toLowerCase()
-        if (text.includes('report has been updated successfully') ||
-            text.includes('report updated successfully') ||
-            text.includes('successfully updated')) {
-          const elapsedTime = Date.now() - startTime
-          console.log(`[SUCCESS] Found success notification after ${elapsedTime}ms: "${text.substring(0, 100)}"`)
-          return true
-        }
-
-        // Check for error messages
-        if (text.includes('error') || text.includes('failed') || text.includes('unable')) {
-          console.log(`[WARNING] Found error message in toast: "${text.substring(0, 100)}"`)
-          return false
-        }
+    // Fast check for success message - primary toast
+    const toastElements = document.querySelectorAll(toastSelector)
+    for (const toast of toastElements) {
+      const text = (toast.textContent || '').toLowerCase()
+      if (text.includes('report has been updated successfully')) {
+        // IMMEDIATE RETURN - don't wait for toast to disappear
+        return true
       }
 
-      // Fallback: check other potential containers
-      const fallbackElements = document.querySelectorAll(SEL.strategyDeepTestUpdateReportSuccessToastFallback)
-      for (const element of fallbackElements) {
-        const text = (element.textContent || element.innerText || '').toLowerCase()
-        if (text.includes('report has been updated successfully') ||
-            text.includes('report updated successfully')) {
-          const elapsedTime = Date.now() - startTime
-          console.log(`[SUCCESS] Found success notification in fallback element after ${elapsedTime}ms`)
-          return true
-        }
+      // Quick error check
+      if (text.includes('error') || text.includes('failed')) {
+        return false
       }
-
-      // Additional check: if original update snackbar has disappeared, it might indicate success
-      // But only after some time has passed to avoid false positives
-      if (i > 10) { // After 1 second
-        const originalSnackbar = document.querySelector(SEL.strategyDeepTestUpdateReportSnackbar)
-        if (!originalSnackbar) {
-          const elapsedTime = Date.now() - startTime
-          console.log(`[INFO] Original update snackbar disappeared after ${elapsedTime}ms, assuming success`)
-          return true
-        }
-      }
-
-      // Log progress every 2 seconds for debugging
-      if (i > 0 && i % 20 === 0) { // Every 2 seconds (20 * 100ms)
-        const elapsedTime = Date.now() - startTime
-        console.log(`[DEBUG] Still waiting for success notification... ${elapsedTime}ms elapsed`)
-      }
-
-      // Wait for next iteration
-      await page.waitForTimeout(tick)
-
-    } catch (error) {
-      console.log(`[WARNING] Error during success notification polling: ${error.message}`)
-      await page.waitForTimeout(tick)
     }
+
+    // Fast fallback check
+    const fallbackElements = document.querySelectorAll(fallbackSelector)
+    for (const element of fallbackElements) {
+      const text = (element.textContent || '').toLowerCase()
+      if (text.includes('report has been updated successfully')) {
+        // IMMEDIATE RETURN - don't wait for toast to disappear
+        return true
+      }
+    }
+
+    // Quick snackbar disappearance check (after 500ms)
+    if (i > 10) {
+      const originalSnackbar = document.querySelector(SEL.strategyDeepTestUpdateReportSnackbar)
+      if (!originalSnackbar) {
+        return true
+      }
+    }
+
+    // Minimal delay for next check
+    await new Promise(resolve => setTimeout(resolve, tick))
   }
 
-  const elapsedTime = Date.now() - startTime
-  console.log(`[WARNING] Timeout waiting for success notification after ${elapsedTime}ms`)
-  return false
+  return false // Timeout
 }
 
 /**
@@ -983,7 +959,6 @@ tv._waitForRegularReportUpdate = async (timeout = 15000) => {
  * @returns {Promise<boolean>} - True if tab content is stable
  */
 tv._fastTabStabilization = async (selRow, timeout = 800) => {
-  const startTime = Date.now()
   const tick = 100
   const maxIterations = Math.floor(timeout / tick)
 
@@ -1011,7 +986,6 @@ tv._fastTabStabilization = async (selRow, timeout = 800) => {
  * @returns {Promise<boolean>} - True if data appears loaded
  */
 tv._fastDataDetection = async (timeout = 1000) => {
-  const startTime = Date.now()
   const checkInterval = 50 // Faster polling
   const maxIterations = Math.floor(timeout / checkInterval)
 
@@ -1897,7 +1871,7 @@ tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
   let duplicatesSkipped = 0
 
   // Optimized field assignment with minimal logging
-  function assignField(fieldName, value, source = 'parsing') {
+  function assignField(fieldName, value) {
     if (parsedFields.has(fieldName)) {
       const existingValue = report[fieldName]
       if (existingValue === 'error' && value !== 'error') {
@@ -1969,7 +1943,7 @@ tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
         }
       }
 
-      const digitalValues = cleanValue.toString().replaceAll(/([\-\d\.\n])|(.)/g, (a, b) => b || '')
+      const digitalValues = cleanValue.toString().replaceAll(/([\-\d\.\n])|(.)/g, (_, b) => b || '')
 
       const result = rowName.toLowerCase().includes('trades') || rowName.toLowerCase().includes('contracts held')
         ? parseInt(digitalValues)
@@ -2105,15 +2079,10 @@ tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
         ].includes(paramName.toLowerCase())// && allTdEl[i].querySelector('[class^="negativeValue"]')
         if (values && typeof values === 'string' && strategyHeaders[i]) {
           try {
-            // Enhanced logging for Net profit and other key metrics
-            const isKeyMetric = paramName.toLowerCase().includes('net profit') ||
-                               paramName.toLowerCase().includes('gross profit') ||
-                               paramName.toLowerCase().includes('gross loss')
-
-            // Key metric detected - processing
+            // Processing key metrics
 
             values = values.replaceAll(' ', ' ').replaceAll('−', '-').trim()
-            const digitalValues = values.replaceAll(/([\-\d\.\n])|(.)/g, (a, b) => b || '')
+            const digitalValues = values.replaceAll(/([\-\d\.\n])|(.)/g, (_, b) => b || '')
             let digitOfValues = digitalValues.match(/-?\d+\.?\d*/)
             const nameDigits = isSingleValue ? paramName : `${paramName}: ${strategyHeaders[i]}`
             const namePercents = isSingleValue ? `${paramName} %` : `${paramName} %: ${strategyHeaders[i]}`
@@ -2658,25 +2627,22 @@ tv.getPerformance = async (testResults, isIgnoreError = false) => {
     if (updateButtonClicked) {
       console.log('[INFO] Update report button clicked, waiting for completion...')
       // Wait for the update to complete
-      const updateSuccess = await tv._waitForUpdateReportSuccess(15000)
+      const updateSuccess = await tv._waitForUpdateReportSuccess(5000) // Reduced timeout
       if (updateSuccess) {
-        console.log('[INFO] Regular report update completed successfully')
+        // SUCCESS MESSAGE DETECTED - START PARSING IMMEDIATELY
+        console.log('[INFO] Report update success detected - starting parsing immediately')
       } else {
-        console.log('[WARNING] Regular report update may not have completed successfully')
+        console.log('[WARNING] Update timeout - proceeding with parsing anyway')
       }
     } else {
-      // Even if no update button, still wait for any update notifications
-      console.log('[INFO] No update button found, checking for update notifications...')
-      const reportUpdateSuccess = await tv._waitForRegularReportUpdate(5000)
-
+      // Quick check for update notifications
+      const reportUpdateSuccess = await tv._waitForRegularReportUpdate(2000) // Reduced timeout
       if (!reportUpdateSuccess) {
-        console.log('[INFO] No report update notifications detected - report may already be current')
+        console.log('[INFO] No update notifications - report may be current')
       }
     }
 
-    // Wait for report to be fully populated with data
-    console.log('[INFO] Waiting for report to be fully populated...')
-    await tv._waitForReportDataPopulation(testResults.isDeepTest)
+    // REMOVED: _waitForReportDataPopulation - start parsing immediately after success message
 
     // Additional small delay to ensure report is fully rendered
     await page.waitForTimeout(500)
