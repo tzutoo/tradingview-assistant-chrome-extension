@@ -116,6 +116,11 @@ backtest.testStrategy = async (testResults, strategyData, allRangeParams) => {
     } else {
       try {
         let text = `<p>Cycle: ${i + 1}/${testResults.cycles}. Best "${testResults.optParamName}": ${backtest.convertValue(testResults.bestValue)}</p>`
+        // Debug logging for UI display issue
+        console.log(`[UI_DEBUG] optRes.currentValue:`, optRes.currentValue)
+        console.log(`[UI_DEBUG] typeof optRes.currentValue:`, typeof optRes.currentValue)
+        console.log(`[UI_DEBUG] optRes.currentValue truthy check:`, !!optRes.currentValue)
+
         text += optRes.currentValue ? `<p>Current "${testResults.optParamName}": ${backtest.convertValue(optRes.currentValue)}</p>` : `<p>Current "${testResults.optParamName}": error</p>`
         text += optRes.error !== null ? `<p style="color: red">${optRes.message}</p>` : optRes.message ? `<p>${optRes.message}</p>` : ''
         ui.statusMessage(text)
@@ -215,6 +220,7 @@ async function getInitBestValues(testResults) {
 
 
 backtest.getTestIterationResult = async (testResults, propVal, isIgnoreError = false, isIgnoreSetParam = false) => {
+  console.log(`[BACKTEST_DEBUG] *** getTestIterationResult called with optParamName: "${testResults.optParamName}" ***`)
   try {
     // Wait for tv object to be available with timeout
     console.log('[BACKTEST_DEBUG] Waiting for tv object to be available...')
@@ -273,15 +279,60 @@ backtest.getTestIterationResult = async (testResults, propVal, isIgnoreError = f
     }
     const setTime = Math.round((new Date() - startTime) / 1000 * 10) / 10
     startTime = new Date()
+    console.log(`[BACKTEST_DEBUG] About to call tv.getPerformance...`)
     const res = await tv.getPerformance(testResults, isIgnoreError)
+    console.log(`[BACKTEST_DEBUG] tv.getPerformance completed, res.error: ${res.error}`)
     const parseTime = Math.round((new Date() - startTime) / 1000 * 10) / 10
 
     Object.keys(propVal).forEach(key => res['data'][`__${key}`] = propVal[key])
 
+    // Set currentValue immediately after data is available, regardless of error status
+    console.log(`[BACKTEST_DEBUG] *** About to set currentValue for optParamName: "${testResults.optParamName}" ***`)
+
+    // First try direct lookup
+    res.currentValue = res.data[testResults.optParamName]
+
+    // Debug logging for currentValue issue
+    console.log(`[CURRENT_VALUE_DEBUG] optParamName: "${testResults.optParamName}"`)
+    console.log(`[CURRENT_VALUE_DEBUG] res.data keys:`, Object.keys(res.data))
+    console.log(`[CURRENT_VALUE_DEBUG] res.currentValue:`, res.currentValue)
+    console.log(`[CURRENT_VALUE_DEBUG] res.data[optParamName]:`, res.data[testResults.optParamName])
+
+    // Fallback: if currentValue is undefined, try to find the field with similar name
+    if (res.currentValue === undefined || res.currentValue === null) {
+      console.log(`[CURRENT_VALUE_DEBUG] currentValue is null/undefined, searching for similar field...`)
+
+      // The parsed field names include the value like "Net profit: All: -149.49"
+      // We need to find fields that START with optParamName
+      const possibleFields = Object.keys(res.data).filter(key => {
+        return key.startsWith(testResults.optParamName + ': ')
+      })
+
+      console.log(`[CURRENT_VALUE_DEBUG] Found possible fields:`, possibleFields)
+
+      if (possibleFields.length > 0) {
+        // Extract the numeric value from the field name (after the last colon and space)
+        const fieldName = possibleFields[0]
+
+        // Extract number from field name like "Net profit: All: -149.49"
+        const match = fieldName.match(/:\s*([^:]+)$/)
+        if (match) {
+          const numericValue = parseFloat(match[1].trim())
+          if (!isNaN(numericValue)) {
+            res.currentValue = numericValue
+            console.log(`[CURRENT_VALUE_DEBUG] Extracted numeric value from field name "${fieldName}": ${res.currentValue}`)
+          }
+        }
+      }
+    }
+
+    console.log(`[BACKTEST_DEBUG] Checking res.error: ${res.error}, isIgnoreError: ${isIgnoreError}`)
 
     if (res.error === null || isIgnoreError) {
+      console.log(`[BACKTEST_DEBUG] No error, proceeding with calculation...`)
       res['data'] = calculateAdditionValuesToReport(res['data'])
     } else {
+      console.log(`[BACKTEST_DEBUG] Error detected, but still setting currentValue from parsed data...`)
       res['data']['comment'] = res['error'] === 2 ? 'The tradingview error occurred when calculating the strategy based on these parameter values' :
         res['error'] === 1 ? 'The tradingview calculation process has not started for the strategy based on these parameter values' :
           res['error'] === 3 ? `The calculation of the strategy parameters took more than ${testResults.dataLoadingTime} seconds for one combination. Testing of this combination is skipped.` : ''
@@ -316,8 +367,6 @@ async function getResWithBestValue(res, testResults, bestValue, bestPropVal, pro
     else
       testResults.perfomanceSummary.push(res.data)
     await storage.setKeys(storage.STRATEGY_KEY_RESULTS, testResults)
-
-    res.currentValue = res.data[testResults.optParamName]
     if (!isFiltered) {
       if (bestValue === null || typeof bestValue === 'undefined') {
         res.bestValue = res.data[testResults.optParamName]
@@ -347,10 +396,13 @@ async function getResWithBestValue(res, testResults, bestValue, bestPropVal, pro
       res.isFiltered = true
     }
   } else {
+    console.log(`[BACKTEST_DEBUG] In else branch - setting currentValue to missed message`)
     res.bestValue = bestValue
     res.bestPropVal = bestPropVal
     res.currentValue = `${testResults.optParamName} missed in data`
   }
+
+  console.log(`[BACKTEST_DEBUG] *** Returning res with currentValue: ${res.currentValue} ***`)
   return res
 }
 
