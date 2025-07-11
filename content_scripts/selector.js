@@ -186,6 +186,16 @@ const SEL = {
     return 'button[data-overflow-tooltip-text="Update report"]'
   },
 
+  get strategyDeepTestUpdateReportSuccessToast() {
+    // Success toast notification after report update
+    return '[class*="toast"], [class*="snackbar"], [class*="notification"], [role="alert"], [role="status"]'
+  },
+
+  get strategyDeepTestUpdateReportSuccessToastFallback() {
+    // Fallback: any element that might contain success message
+    return 'div[class*="message"], div[class*="alert"], div[class*="banner"]'
+  },
+
   strategyListOptions: 'div[role="listbox"] div[data-name="menu-inner"] div[role="option"] span[class^="label-"]',
   strategyDefaultElement: '#property-actions',
 

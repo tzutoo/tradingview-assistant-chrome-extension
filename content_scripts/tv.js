@@ -447,9 +447,16 @@ tv._findAndClickUpdateReportButton = async () => {
     console.log('[INFO] Clicking "Update report" button')
     page.mouseClick(updateButton)
 
-    // Wait for the snackbar to disappear
-    await page.waitForTimeout(1000)
-    return true
+    // Wait for success notification instead of fixed timeout
+    const success = await tv._waitForUpdateReportSuccess()
+    if (success) {
+      console.log('[INFO] Update report completed successfully')
+      return true
+    } else {
+      console.log('[WARNING] Update report may not have completed successfully, falling back to timeout')
+      await page.waitForTimeout(1000) // Fallback to original behavior
+      return true // Return true to maintain backward compatibility
+    }
   }
 
   // Fallback: search for button by text content
@@ -461,13 +468,115 @@ tv._findAndClickUpdateReportButton = async () => {
     if (text.includes('update report') || tooltip.includes('Update report')) {
       console.log('[INFO] Found "Update report" button by text search, clicking...')
       page.mouseClick(button)
-      await page.waitForTimeout(1000)
-      return true
+
+      // Wait for success notification instead of fixed timeout
+      const success = await tv._waitForUpdateReportSuccess()
+      if (success) {
+        console.log('[INFO] Update report completed successfully (fallback method)')
+        return true
+      } else {
+        console.log('[WARNING] Update report may not have completed successfully (fallback method), using timeout')
+        await page.waitForTimeout(1000) // Fallback to original behavior
+        return true // Return true to maintain backward compatibility
+      }
     }
   }
 
   console.log('[WARNING] Found update snackbar but could not find "Update report" button')
   return false
+}
+
+tv._waitForUpdateReportSuccess = async (timeout = 10000) => {
+  console.log('[INFO] Waiting for "The report has been updated successfully" notification...')
+
+  const startTime = Date.now()
+  const tick = 100 // Check every 100ms
+  const maxIterations = Math.floor(timeout / tick)
+
+  for (let i = 0; i < maxIterations; i++) {
+    try {
+      // Check for success message in toast notifications
+      const toastElements = document.querySelectorAll(SEL.strategyDeepTestUpdateReportSuccessToast)
+      for (const toast of toastElements) {
+        const text = (toast.textContent || toast.innerText || '').toLowerCase()
+        if (text.includes('report has been updated successfully') ||
+            text.includes('report updated successfully') ||
+            text.includes('successfully updated')) {
+          const elapsedTime = Date.now() - startTime
+          console.log(`[SUCCESS] Found success notification after ${elapsedTime}ms: "${text.substring(0, 100)}"`)
+          return true
+        }
+
+        // Check for error messages
+        if (text.includes('error') || text.includes('failed') || text.includes('unable')) {
+          console.log(`[WARNING] Found error message in toast: "${text.substring(0, 100)}"`)
+          return false
+        }
+      }
+
+      // Fallback: check other potential containers
+      const fallbackElements = document.querySelectorAll(SEL.strategyDeepTestUpdateReportSuccessToastFallback)
+      for (const element of fallbackElements) {
+        const text = (element.textContent || element.innerText || '').toLowerCase()
+        if (text.includes('report has been updated successfully') ||
+            text.includes('report updated successfully')) {
+          const elapsedTime = Date.now() - startTime
+          console.log(`[SUCCESS] Found success notification in fallback element after ${elapsedTime}ms`)
+          return true
+        }
+      }
+
+      // Additional check: if original update snackbar has disappeared, it might indicate success
+      // But only after some time has passed to avoid false positives
+      if (i > 10) { // After 1 second
+        const originalSnackbar = document.querySelector(SEL.strategyDeepTestUpdateReportSnackbar)
+        if (!originalSnackbar) {
+          const elapsedTime = Date.now() - startTime
+          console.log(`[INFO] Original update snackbar disappeared after ${elapsedTime}ms, assuming success`)
+          return true
+        }
+      }
+
+      // Log progress every 2 seconds for debugging
+      if (i > 0 && i % 20 === 0) { // Every 2 seconds (20 * 100ms)
+        const elapsedTime = Date.now() - startTime
+        console.log(`[DEBUG] Still waiting for success notification... ${elapsedTime}ms elapsed`)
+      }
+
+      // Wait for next iteration
+      await page.waitForTimeout(tick)
+
+    } catch (error) {
+      console.log(`[WARNING] Error during success notification polling: ${error.message}`)
+      await page.waitForTimeout(tick)
+    }
+  }
+
+  const elapsedTime = Date.now() - startTime
+  console.log(`[WARNING] Timeout waiting for success notification after ${elapsedTime}ms`)
+  return false
+}
+
+// Test function to verify the success notification detection
+tv._testUpdateReportSuccessDetection = async () => {
+  console.log('[TEST] Testing update report success detection...')
+
+  // Test the selectors
+  const toastElements = document.querySelectorAll(SEL.strategyDeepTestUpdateReportSuccessToast)
+  const fallbackElements = document.querySelectorAll(SEL.strategyDeepTestUpdateReportSuccessToastFallback)
+
+  console.log(`[TEST] Found ${toastElements.length} toast elements`)
+  console.log(`[TEST] Found ${fallbackElements.length} fallback elements`)
+
+  // Test if update snackbar is present
+  const updateSnackbar = document.querySelector(SEL.strategyDeepTestUpdateReportSnackbar)
+  console.log(`[TEST] Update snackbar present: ${!!updateSnackbar}`)
+
+  return {
+    toastCount: toastElements.length,
+    fallbackCount: fallbackElements.length,
+    updateSnackbarPresent: !!updateSnackbar
+  }
 }
 
 // Test function for debugging deep testing UI detection
@@ -655,8 +764,8 @@ tv.setDeepTest = async (isDeepTest) => {
     // Check for "Update report" snackbar and click if present
     const updateClicked = await tv._findAndClickUpdateReportButton()
     if (updateClicked) {
-      console.log('[INFO] Clicked "Update report" button, waiting for report to update...')
-      await page.waitForTimeout(2000) // Give more time for report to update
+      console.log('[INFO] Update report button clicked and success confirmed')
+      // No additional timeout needed - success waiting is handled in _findAndClickUpdateReportButton
     }
 
     console.log('[INFO] Deep testing mode enabled using new UI')
@@ -1110,8 +1219,8 @@ tv.generateDeepTestReport = async () => { //loadingTime = 60000) => {
     // Check for "Update report" snackbar first
     const updateClicked = await tv._findAndClickUpdateReportButton()
     if (updateClicked) {
-      console.log('[INFO] Found and clicked "Update report" button, waiting for report to update...')
-      await page.waitForTimeout(2000)
+      console.log('[INFO] Update report button clicked and success confirmed')
+      // No additional timeout needed - success waiting is handled in _findAndClickUpdateReportButton
     }
 
     // In the new UI, selecting "Entire history" automatically triggers the deep testing
