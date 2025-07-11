@@ -492,19 +492,18 @@ ui.showAndUpdateStrategyParameters = async (testParams) => {
       const tbody = document.getElementById('stratParamData')
 
       let paramRows = ''
-      const processedParams = []
-      for(let name in testParams.paramRange) {
-        if (testParams.paramRange[name][0] === null || (isNaN(testParams.paramRange[name][0]) &&
-          (typeof testParams.paramRange[name][0] !== 'string' || !testParams.paramRange[name][0].includes(';'))))
-          continue
-        paramRows += `\n<tr>${prepareRow(name, testParams.paramRange[name], true)}</tr>`
-        processedParams.push(name)
-      }
+      // Iterate through original strategy parameters to preserve order
       for(let name in testParams.paramRangeSrc) {
-        if(!processedParams.includes(name) && testParams.paramRangeSrc[name][0] !== null && (
-          !isNaN(testParams.paramRangeSrc[name][0]) ||
-          (typeof testParams.paramRangeSrc[name][0] === 'string') && testParams.paramRangeSrc[name][0].includes(';')))
-          paramRows += `\n<tr>${prepareRow(name, testParams.paramRangeSrc[name], false)}</tr>`
+        // Check if parameter exists in saved/active parameters
+        const isActive = testParams.paramRange.hasOwnProperty(name)
+        const paramData = isActive ? testParams.paramRange[name] : testParams.paramRangeSrc[name]
+
+        // Validate parameter data
+        if (paramData[0] === null || (isNaN(paramData[0]) &&
+          (typeof paramData[0] !== 'string' || !paramData[0].includes(';'))))
+          continue
+
+        paramRows += `\n<tr>${prepareRow(name, paramData, isActive)}</tr>`
       }
       if (paramRows)
         tbody.innerHTML = paramRows // tbody.appendChild(paramRows)
