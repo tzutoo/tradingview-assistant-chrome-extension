@@ -667,6 +667,10 @@ action.show3DChart = async () => {
     await ui.showPopup(eventData.message)
 }
 
+action.analyzeCSV = async () => {
+  await csvAnalyzer.uploadAndAnalyzeCSV()
+}
+
 async function sendActionMessage(data, action) {
   return new Promise(resolve => {
     const url = window.location && window.location.origin ? window.location.origin : 'https://www.tradingview.com'

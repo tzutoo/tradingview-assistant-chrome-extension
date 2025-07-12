@@ -33,7 +33,7 @@ function setOptionsEvents() {
 }
 
 function setClickEvents() {
-  for(let elId of ['uploadSignals', 'testStrategy', 'previewStrategyTestResults', 'downloadStrategyTestResults', 'getStrategyTemplate', 'uploadStrategyTestParameters', 'clearAll', 'show3DChart']) {
+  for(let elId of ['uploadSignals', 'testStrategy', 'previewStrategyTestResults', 'downloadStrategyTestResults', 'getStrategyTemplate', 'uploadStrategyTestParameters', 'clearAll', 'show3DChart', 'analyzeCSV']) {
     function signalListener() {
       sendSignalToActiveTab(elId)
     }

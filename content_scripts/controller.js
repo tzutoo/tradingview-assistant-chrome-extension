@@ -61,6 +61,9 @@
           case 'show3DChart':
             await action.show3DChart()
             break
+          case 'analyzeCSV':
+            await action.analyzeCSV()
+            break
           default:
             console.log('None of realisation for signal:', request)
         }
