@@ -35,7 +35,7 @@ page.waitForSelector = async (selector, timeout = 5000, isHide = false, parentEl
       elem = parentEl.querySelector(selector)
     } catch {
     }
-    const tikTime = timeout === 0 ? 1000 : 50
+    const tikTime = timeout === 0 ? 1000 : 10 // MAXIMUM SPEED: 10ms polling
     while (timeout === 0 || (!isHide && !elem) || (isHide && !!elem)) {
       await page.waitForTimeout(tikTime)
       try {

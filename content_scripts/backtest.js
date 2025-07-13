@@ -55,6 +55,21 @@ backtest.testStrategy = async (testResults, strategyData, allRangeParams) => {
       console.log('Stop command detected')
       break
     }
+
+    // MAXIMUM SPEED: Check for "Update report" button and click IMMEDIATELY
+    try {
+      let tv = window.tv || globalThis.tv
+      if (tv && tv._checkAndClickRegularUpdateReportButton) {
+        const updateButtonClicked = await tv._checkAndClickRegularUpdateReportButton()
+        if (updateButtonClicked) {
+          console.log(`[CYCLE_${i}] INSTANT: "Update report" clicked - continuing immediately`)
+          // NO WAITING - continue immediately for maximum speed
+        }
+      }
+    } catch (error) {
+      // Silent error handling for maximum speed
+    }
+
     // if (page.$(SEL.goproPopupCloseButton)) {
     //   page.mouseClickSelector(SEL.goproPopupCloseButton)
     //   console.log('GoPro popup was closed')
@@ -271,15 +286,47 @@ backtest.getTestIterationResult = async (testResults, propVal, isIgnoreError = f
     const tv = tvObject
 
     tv.isReportChanged = false // Global value
+
+    // CRITICAL: Before setting parameters, ensure report is completely ready
+    console.log('[BACKTEST_ITERATION] Ensuring report is completely ready before parameter setting...')
+
+    // INSTANT: Check for and click "Update report" button immediately if present
+    const updateButtonClicked = await tv._checkAndClickRegularUpdateReportButton()
+    if (updateButtonClicked) {
+      console.log('[BACKTEST_ITERATION] INSTANT: "Update report" clicked - continuing immediately')
+      // NO WAITING - continue immediately for maximum speed
+    }
+
+    // INSTANT CHECK: Quick check if report is updating, but don't wait
+    if (tv._isReportCurrentlyUpdating()) {
+      console.log('[BACKTEST_ITERATION] INSTANT: Report updating detected - clicking any update buttons')
+      await tv._checkAndClickRegularUpdateReportButton() // Click immediately if available
+    }
+
     let startTime = new Date()
     if (!isIgnoreSetParam) {
+      // INSTANT: Final check and immediate action
+      if (tv._isReportCurrentlyUpdating()) {
+        console.log('[BACKTEST_ITERATION] INSTANT: Report updating - clicking update button immediately')
+        await tv._checkAndClickRegularUpdateReportButton() // Click immediately, no waiting
+      }
+
+      console.log('[BACKTEST_ITERATION] INSTANT: Setting strategy parameters now...')
       const isParamsSet = await tv.setStrategyParams(testResults.shortName, propVal, false)
       if (!isParamsSet)
         return { error: 1, errMessage: 'The strategy parameters cannot be set', data: null }
 
-      // CRITICAL: After setting parameters, ensure report will be current
-      console.log('[BACKTEST_ITERATION] Parameters set, ensuring report will be current...')
-      await page.waitForTimeout(1000) // Give TradingView time to detect parameter change
+      // INSTANT: Quick check for any update buttons after parameter setting
+      console.log('[BACKTEST_ITERATION] INSTANT: Parameters set, quick update check...')
+
+      // Quick check and click any update buttons, no waiting
+      await tv._checkAndClickRegularUpdateReportButton()
+
+      // Very brief check for updates, but don't wait long
+      const reportUpdateSuccess = await tv._waitForRegularReportUpdate(1000) // 1 second max
+      if (!reportUpdateSuccess) {
+        console.log('[BACKTEST_ITERATION] INSTANT: Continuing immediately for maximum speed')
+      }
     }
     const setTime = Math.round((new Date() - startTime) / 1000 * 10) / 10
     startTime = new Date()

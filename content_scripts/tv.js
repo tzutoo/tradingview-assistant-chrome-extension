@@ -714,18 +714,10 @@ tv._findAndClickUpdateReportButton = async () => {
   // Try primary selector for the update button
   let updateButton = document.querySelector(SEL.strategyUpdateReportButton)
   if (updateButton) {
-    console.log('[INFO] Clicking "Update report" button')
+    console.log('[INSTANT] Clicking "Update report" button immediately')
     page.mouseClick(updateButton)
-
-    // Wait for success notification - immediate parsing when detected
-    const success = await tv._waitForUpdateReportSuccess(3000) // Reduced timeout
-    if (success) {
-      console.log('[INFO] Update report success detected - ready for parsing')
-      return true
-    } else {
-      console.log('[WARNING] Update timeout - proceeding anyway')
-      return true // Proceed anyway
-    }
+    // NO WAITING - return immediately for maximum speed
+    return true
   }
 
   // Fallback: search for button by text content
@@ -735,18 +727,10 @@ tv._findAndClickUpdateReportButton = async () => {
     const tooltip = button.getAttribute('data-overflow-tooltip-text') || ''
 
     if (text.includes('update report') || tooltip.includes('Update report')) {
-      console.log('[INFO] Found "Update report" button by text search, clicking...')
+      console.log('[INSTANT] Found "Update report" button by text, clicking immediately')
       page.mouseClick(button)
-
-      // Wait for success notification - immediate parsing when detected
-      const success = await tv._waitForUpdateReportSuccess(3000) // Reduced timeout
-      if (success) {
-        console.log('[INFO] Update report success detected (fallback method)')
-        return true
-      } else {
-        console.log('[WARNING] Update timeout (fallback method) - proceeding anyway')
-        return true // Proceed anyway
-      }
+      // NO WAITING - return immediately for maximum speed
+      return true
     }
   }
 
@@ -934,19 +918,19 @@ tv._checkAndClickRegularUpdateReportButton = async () => {
   // Try to find and click the update button
   let updateButton = document.querySelector(SEL.strategyUpdateReportButton)
   if (updateButton) {
-    console.log('[INFO] Clicking "Update report" button for regular report')
+    console.log('[INSTANT] Clicking "Update report" button immediately')
     page.mouseClick(updateButton)
     return true
   }
 
-  // Fallback: search for button by text
+  // INSTANT fallback: search for button by text
   const buttons = document.querySelectorAll('button')
   for (const button of buttons) {
     const text = (button.textContent || button.innerText || '').toLowerCase()
     const tooltip = (button.getAttribute('data-overflow-tooltip-text') || '').toLowerCase()
 
     if (text.includes('update report') || tooltip.includes('update report')) {
-      console.log('[INFO] Found "Update report" button by text search for regular report, clicking...')
+      console.log('[INSTANT] Found "Update report" button by text, clicking immediately')
       page.mouseClick(button)
       return true
     }
@@ -957,15 +941,74 @@ tv._checkAndClickRegularUpdateReportButton = async () => {
 }
 
 /**
+ * Check if report is currently updating (blocking function)
+ * @returns {boolean} - True if "Updating report" is currently showing
+ */
+tv._isReportCurrentlyUpdating = () => {
+  try {
+    // Check for "Updating report" toast notifications
+    const toastElements = document.querySelectorAll(SEL.strategyUpdateReportSuccessToast)
+    for (const toast of toastElements) {
+      const text = (toast.textContent || toast.innerText || '').toLowerCase()
+      if (text.includes('updating report')) {
+        return true
+      }
+    }
+
+    // Also check fallback elements
+    const fallbackElements = document.querySelectorAll(SEL.strategyUpdateReportSuccessToastFallback)
+    for (const element of fallbackElements) {
+      const text = (element.textContent || element.innerText || '').toLowerCase()
+      if (text.includes('updating report')) {
+        return true
+      }
+    }
+
+    return false
+  } catch (error) {
+    console.warn('[BLOCKING_CHECK] Error checking for updating report:', error.message)
+    return false
+  }
+}
+
+/**
+ * Wait until report is NOT updating before proceeding
+ * @param {number} timeout - Maximum time to wait in milliseconds
+ * @returns {Promise<boolean>} - True if safe to proceed
+ */
+tv._waitUntilReportNotUpdating = async (timeout = 5000) => {
+  console.log('[SPEED_CHECK] Fast checking if report is updating...')
+
+  const startTime = Date.now()
+  const tick = 10 // MAXIMUM SPEED: Check every 10ms
+  const maxIterations = Math.floor(timeout / tick)
+
+  for (let i = 0; i < maxIterations; i++) {
+    if (!tv._isReportCurrentlyUpdating()) {
+      const elapsedTime = Date.now() - startTime
+      console.log(`[SPEED_CHECK] Report ready after ${elapsedTime}ms`)
+      return true
+    }
+
+    // No logging for maximum speed
+    await page.waitForTimeout(tick)
+  }
+
+  const elapsedTime = Date.now() - startTime
+  console.log(`[SPEED_CHECK] Quick timeout after ${elapsedTime}ms - proceeding`)
+  return false
+}
+
+/**
  * Wait for regular report update notifications (for non-deep testing)
  * @param {number} timeout - Maximum time to wait in milliseconds
  * @returns {Promise<boolean>} - True if report update completed successfully
  */
-tv._waitForRegularReportUpdate = async (timeout = 15000) => {
-  console.log('[INFO] Waiting for regular report update notifications...')
+tv._waitForRegularReportUpdate = async (timeout = 3000) => {
+  console.log('[SPEED] Fast checking for report updates...')
 
   const startTime = Date.now()
-  const tick = 100 // Check every 100ms
+  const tick = 10 // MAXIMUM SPEED: Check every 10ms
   const maxIterations = Math.floor(timeout / tick)
 
   let foundUpdatingMessage = false
@@ -978,8 +1021,8 @@ tv._waitForRegularReportUpdate = async (timeout = 15000) => {
       for (const toast of toastElements) {
         const text = (toast.textContent || toast.innerText || '').toLowerCase()
 
-        // Check for "Updating report" message
-        if (!foundUpdatingMessage && (text.includes('updating report') || text.includes('update report'))) {
+        // Check for "Updating report" message (NOT "Update report" button)
+        if (!foundUpdatingMessage && text.includes('updating report')) {
           foundUpdatingMessage = true
           console.log(`[INFO] Found "Updating report" notification: "${text.substring(0, 100)}"`)
         }
@@ -1006,7 +1049,7 @@ tv._waitForRegularReportUpdate = async (timeout = 15000) => {
       for (const element of fallbackElements) {
         const text = (element.textContent || element.innerText || '').toLowerCase()
 
-        if (!foundUpdatingMessage && (text.includes('updating report') || text.includes('update report'))) {
+        if (!foundUpdatingMessage && text.includes('updating report')) {
           foundUpdatingMessage = true
           console.log(`[INFO] Found "Updating report" notification in fallback: "${text.substring(0, 100)}"`)
         }
@@ -1028,8 +1071,8 @@ tv._waitForRegularReportUpdate = async (timeout = 15000) => {
 
   const elapsedTime = Date.now() - startTime
   if (foundUpdatingMessage && !foundSuccessMessage) {
-    console.log(`[WARNING] Found "Updating report" but no success message after ${elapsedTime}ms - proceeding anyway`)
-    return true // Proceed if we at least saw the updating message
+    console.log(`[WARNING] Found "Updating report" but no success message after ${elapsedTime}ms - BLOCKING until complete`)
+    return false // DO NOT PROCEED if updating is still in progress
   } else if (!foundUpdatingMessage) {
     console.log(`[INFO] No report update notifications found after ${elapsedTime}ms - report may already be current`)
     return true // No update needed
@@ -1073,8 +1116,8 @@ tv._fastTabStabilization = async (selRow, timeout = 800) => {
  * @param {number} timeout - Maximum time to wait in milliseconds
  * @returns {Promise<boolean>} - True if data appears loaded
  */
-tv._fastDataDetection = async (timeout = 1000) => {
-  const checkInterval = 50 // Faster polling
+tv._fastDataDetection = async (timeout = 500) => {
+  const checkInterval = 10 // MAXIMUM SPEED: 10ms polling
   const maxIterations = Math.floor(timeout / checkInterval)
 
   // Cache selectors for performance
